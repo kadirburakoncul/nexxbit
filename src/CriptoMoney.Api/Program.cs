@@ -137,8 +137,16 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
-    await DatabaseSeeder.SeedAsync(db);
+    try
+    {
+        await db.Database.MigrateAsync();
+        await DatabaseSeeder.SeedAsync(db);
+    }
+    catch (Exception ex)
+    {
+        var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        startupLogger.LogWarning(ex, "Migration/Seed sırasında hata oluştu, uygulama devam ediyor.");
+    }
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();

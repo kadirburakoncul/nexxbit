@@ -18,7 +18,11 @@ public static class DependencyInjection
 
         services.AddDbContext<AppDbContext>(options =>
             options.UseMySql(connectionString, serverVersion,
-                mysql => mysql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName)));
+                mysql =>
+                {
+                    mysql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
+                    mysql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(5), null);
+                }));
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddScoped<IUnitOfWork, UnitOfWork>();
