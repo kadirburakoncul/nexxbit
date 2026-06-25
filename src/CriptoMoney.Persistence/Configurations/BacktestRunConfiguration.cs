@@ -11,8 +11,8 @@ public class BacktestRunConfiguration : IEntityTypeConfiguration<BacktestRun>
         builder.HasKey(r => r.Id);
         builder.Property(r => r.Name).HasMaxLength(200);
         builder.Property(r => r.Timeframe).HasMaxLength(5).IsRequired();
-        builder.Property(r => r.CoinIds).HasColumnType("nvarchar(max)");
-        builder.Property(r => r.StrategyConfig).HasColumnType("nvarchar(max)");
+        builder.Property(r => r.CoinIds).HasColumnType("longtext");
+        builder.Property(r => r.StrategyConfig).HasColumnType("longtext");
         builder.Property(r => r.ErrorMessage).HasMaxLength(2000);
         builder.Property(r => r.InitialCapital).HasPrecision(18, 2);
         builder.Property(r => r.CommissionRate).HasPrecision(6, 5);

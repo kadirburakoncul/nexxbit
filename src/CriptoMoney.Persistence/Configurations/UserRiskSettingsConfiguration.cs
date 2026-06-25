@@ -16,7 +16,7 @@ public class UserRiskSettingsConfiguration : IEntityTypeConfiguration<UserRiskSe
         builder.Property(r => r.DefaultStopLossPct).HasPrecision(5, 2);
         builder.Property(r => r.DefaultTakeProfitPct).HasPrecision(5, 2);
         builder.Property(r => r.DailyLossUsedUsdt).HasPrecision(18, 2);
-        builder.Property(r => r.AllowedCoinIds).HasColumnType("nvarchar(max)");
-        builder.Property(r => r.BlockedCoinIds).HasColumnType("nvarchar(max)");
+        builder.Property(r => r.AllowedCoinIds).HasColumnType("longtext");
+        builder.Property(r => r.BlockedCoinIds).HasColumnType("longtext");
     }
 }

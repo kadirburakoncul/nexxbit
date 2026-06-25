@@ -11,7 +11,7 @@ public class NotificationConfiguration : IEntityTypeConfiguration<Notification>
         builder.HasKey(n => n.Id);
         builder.Property(n => n.Title).HasMaxLength(200).IsRequired();
         builder.Property(n => n.Body).HasMaxLength(1000).IsRequired();
-        builder.Property(n => n.Payload).HasColumnType("nvarchar(max)");
+        builder.Property(n => n.Payload).HasColumnType("longtext");
 
         builder.HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt });
         builder.HasIndex(n => n.IsSent).HasFilter("[IsSent] = 0");

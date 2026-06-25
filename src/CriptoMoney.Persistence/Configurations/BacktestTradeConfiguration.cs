@@ -16,7 +16,7 @@ public class BacktestTradeConfiguration : IEntityTypeConfiguration<BacktestTrade
         builder.Property(t => t.PnlUsdt).HasPrecision(18, 2);
         builder.Property(t => t.PnlPct).HasPrecision(8, 4);
         builder.Property(t => t.EntryScore).HasPrecision(8, 2);
-        builder.Property(t => t.IndicatorScores).HasColumnType("nvarchar(max)");
+        builder.Property(t => t.IndicatorScores).HasColumnType("longtext");
 
         builder.HasIndex(t => t.BacktestRunId);
 

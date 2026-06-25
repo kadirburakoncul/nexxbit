@@ -234,7 +234,8 @@ namespace CriptoMoney.Persistence.Migrations
                     UserId = table.Column<Guid>(type: "char(36)", nullable: false, collation: "ascii_general_ci"),
                     Name = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: true)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    CoinIds = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    CoinIds = table.Column<string>(type: "longtext", nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     Timeframe = table.Column<string>(type: "varchar(5)", maxLength: 5, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     StartDate = table.Column<DateTime>(type: "datetime(6)", nullable: false),
@@ -243,7 +244,8 @@ namespace CriptoMoney.Persistence.Migrations
                     CommissionRate = table.Column<decimal>(type: "decimal(6,5)", precision: 6, scale: 5, nullable: false),
                     StopLossPct = table.Column<decimal>(type: "decimal(5,2)", precision: 5, scale: 2, nullable: true),
                     TakeProfitPct = table.Column<decimal>(type: "decimal(5,2)", precision: 5, scale: 2, nullable: true),
-                    StrategyConfig = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    StrategyConfig = table.Column<string>(type: "longtext", nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     Status = table.Column<int>(type: "int", nullable: false),
                     FinalCapital = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
                     NetPnl = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
@@ -279,7 +281,8 @@ namespace CriptoMoney.Persistence.Migrations
                         .Annotation("MySql:ValueGenerationStrategy", MySqlValueGenerationStrategy.IdentityColumn),
                     UserId = table.Column<Guid>(type: "char(36)", nullable: false, collation: "ascii_general_ci"),
                     TotalValueUsdt = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
-                    Assets = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    Assets = table.Column<string>(type: "longtext", nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     SnapshotAt = table.Column<DateTime>(type: "datetime(6)", nullable: false)
                 },
                 constraints: table =>
@@ -305,7 +308,8 @@ namespace CriptoMoney.Persistence.Migrations
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     Body = table.Column<string>(type: "varchar(1000)", maxLength: 1000, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    Payload = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Payload = table.Column<string>(type: "longtext", nullable: true)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     Channel = table.Column<int>(type: "int", nullable: false),
                     IsRead = table.Column<bool>(type: "tinyint(1)", nullable: false),
                     IsSent = table.Column<bool>(type: "tinyint(1)", nullable: false),
@@ -413,8 +417,10 @@ namespace CriptoMoney.Persistence.Migrations
                     IsStopLossRequired = table.Column<bool>(type: "tinyint(1)", nullable: false),
                     CloseOnDisconnect = table.Column<bool>(type: "tinyint(1)", nullable: false),
                     IsAutoTradeEnabled = table.Column<bool>(type: "tinyint(1)", nullable: false),
-                    AllowedCoinIds = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    BlockedCoinIds = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    AllowedCoinIds = table.Column<string>(type: "longtext", nullable: true)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
+                    BlockedCoinIds = table.Column<string>(type: "longtext", nullable: true)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     DailyLossUsedUsdt = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
                     DailyLossResetAt = table.Column<DateTime>(type: "datetime(6)", nullable: true),
                     FlashCrashProtectionEnabled = table.Column<bool>(type: "tinyint(1)", nullable: false),
@@ -531,7 +537,8 @@ namespace CriptoMoney.Persistence.Migrations
                     PnlUsdt = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
                     PnlPct = table.Column<decimal>(type: "decimal(8,4)", precision: 8, scale: 4, nullable: true),
                     EntryScore = table.Column<decimal>(type: "decimal(8,2)", precision: 8, scale: 2, nullable: true),
-                    IndicatorScores = table.Column<string>(type: "nvarchar(max)", nullable: true)
+                    IndicatorScores = table.Column<string>(type: "longtext", nullable: true)
+                        .Annotation("MySql:CharSet", "utf8mb4")
                 },
                 constraints: table =>
                 {
@@ -593,7 +600,8 @@ namespace CriptoMoney.Persistence.Migrations
                     TotalScore = table.Column<decimal>(type: "decimal(8,2)", precision: 8, scale: 2, nullable: false),
                     CandleTime = table.Column<DateTime>(type: "datetime(6)", nullable: false),
                     Price = table.Column<decimal>(type: "decimal(28,8)", precision: 28, scale: 8, nullable: false),
-                    IndicatorScores = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IndicatorScores = table.Column<string>(type: "longtext", nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     IsActedUpon = table.Column<bool>(type: "tinyint(1)", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "datetime(6)", nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "datetime(6)", nullable: false)

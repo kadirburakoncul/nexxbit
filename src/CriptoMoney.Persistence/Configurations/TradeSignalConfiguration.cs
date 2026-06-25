@@ -12,7 +12,7 @@ public class TradeSignalConfiguration : IEntityTypeConfiguration<TradeSignal>
         builder.Property(s => s.Timeframe).HasMaxLength(5).IsRequired();
         builder.Property(s => s.TotalScore).HasPrecision(8, 2);
         builder.Property(s => s.Price).HasPrecision(28, 8);
-        builder.Property(s => s.IndicatorScores).HasColumnType("nvarchar(max)");
+        builder.Property(s => s.IndicatorScores).HasColumnType("longtext");
 
         builder.HasIndex(s => new { s.UserId, s.CreatedAt });
         builder.HasIndex(s => new { s.UserId, s.CoinId });

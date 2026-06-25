@@ -122,7 +122,7 @@ CREATE TABLE `BacktestRuns` (
     `Id` char(36) COLLATE ascii_general_ci NOT NULL,
     `UserId` char(36) COLLATE ascii_general_ci NOT NULL,
     `Name` varchar(200) CHARACTER SET utf8mb4 NULL,
-    `CoinIds` nvarchar(max) NOT NULL,
+    `CoinIds` longtext CHARACTER SET utf8mb4 NOT NULL,
     `Timeframe` varchar(5) CHARACTER SET utf8mb4 NOT NULL,
     `StartDate` datetime(6) NOT NULL,
     `EndDate` datetime(6) NOT NULL,
@@ -130,7 +130,7 @@ CREATE TABLE `BacktestRuns` (
     `CommissionRate` decimal(6,5) NOT NULL,
     `StopLossPct` decimal(5,2) NULL,
     `TakeProfitPct` decimal(5,2) NULL,
-    `StrategyConfig` nvarchar(max) NOT NULL,
+    `StrategyConfig` longtext CHARACTER SET utf8mb4 NOT NULL,
     `Status` int NOT NULL,
     `FinalCapital` decimal(18,2) NULL,
     `NetPnl` decimal(18,2) NULL,
@@ -152,7 +152,7 @@ CREATE TABLE `BalanceSnapshots` (
     `Id` bigint NOT NULL AUTO_INCREMENT,
     `UserId` char(36) COLLATE ascii_general_ci NOT NULL,
     `TotalValueUsdt` decimal(18,2) NOT NULL,
-    `Assets` nvarchar(max) NOT NULL,
+    `Assets` longtext CHARACTER SET utf8mb4 NOT NULL,
     `SnapshotAt` datetime(6) NOT NULL,
     CONSTRAINT `PK_BalanceSnapshots` PRIMARY KEY (`Id`),
     CONSTRAINT `FK_BalanceSnapshots_Users_UserId` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE
@@ -164,7 +164,7 @@ CREATE TABLE `Notifications` (
     `Type` int NOT NULL,
     `Title` varchar(200) CHARACTER SET utf8mb4 NOT NULL,
     `Body` varchar(1000) CHARACTER SET utf8mb4 NOT NULL,
-    `Payload` nvarchar(max) NULL,
+    `Payload` longtext CHARACTER SET utf8mb4 NULL,
     `Channel` int NOT NULL,
     `IsRead` tinyint(1) NOT NULL,
     `IsSent` tinyint(1) NOT NULL,
@@ -222,8 +222,8 @@ CREATE TABLE `UserRiskSettings` (
     `IsStopLossRequired` tinyint(1) NOT NULL,
     `CloseOnDisconnect` tinyint(1) NOT NULL,
     `IsAutoTradeEnabled` tinyint(1) NOT NULL,
-    `AllowedCoinIds` nvarchar(max) NULL,
-    `BlockedCoinIds` nvarchar(max) NULL,
+    `AllowedCoinIds` longtext CHARACTER SET utf8mb4 NULL,
+    `BlockedCoinIds` longtext CHARACTER SET utf8mb4 NULL,
     `DailyLossUsedUsdt` decimal(18,2) NOT NULL,
     `DailyLossResetAt` datetime(6) NULL,
     `FlashCrashProtectionEnabled` tinyint(1) NOT NULL,
@@ -290,7 +290,7 @@ CREATE TABLE `BacktestTrades` (
     `PnlUsdt` decimal(18,2) NULL,
     `PnlPct` decimal(8,4) NULL,
     `EntryScore` decimal(8,2) NULL,
-    `IndicatorScores` nvarchar(max) NULL,
+    `IndicatorScores` longtext CHARACTER SET utf8mb4 NULL,
     CONSTRAINT `PK_BacktestTrades` PRIMARY KEY (`Id`),
     CONSTRAINT `FK_BacktestTrades_BacktestRuns_BacktestRunId` FOREIGN KEY (`BacktestRunId`) REFERENCES `BacktestRuns` (`Id`) ON DELETE CASCADE,
     CONSTRAINT `FK_BacktestTrades_Coins_CoinId` FOREIGN KEY (`CoinId`) REFERENCES `Coins` (`Id`) ON DELETE RESTRICT
@@ -316,7 +316,7 @@ CREATE TABLE `TradeSignals` (
     `TotalScore` decimal(8,2) NOT NULL,
     `CandleTime` datetime(6) NOT NULL,
     `Price` decimal(28,8) NOT NULL,
-    `IndicatorScores` nvarchar(max) NOT NULL,
+    `IndicatorScores` longtext CHARACTER SET utf8mb4 NOT NULL,
     `IsActedUpon` tinyint(1) NOT NULL,
     `CreatedAt` datetime(6) NOT NULL,
     `UpdatedAt` datetime(6) NOT NULL,
@@ -482,7 +482,7 @@ CREATE INDEX `IX_UserWatchlists_CoinId` ON `UserWatchlists` (`CoinId`);
 CREATE UNIQUE INDEX `IX_UserWatchlists_UserId_CoinId` ON `UserWatchlists` (`UserId`, `CoinId`);
 
 INSERT INTO `__EFMigrationsHistory` (`MigrationId`, `ProductVersion`)
-VALUES ('20260625181418_InitialMySql', '9.0.6');
+VALUES ('20260625184026_InitialMySql', '9.0.6');
 
 COMMIT;
 

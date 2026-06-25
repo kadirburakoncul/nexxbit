@@ -10,7 +10,7 @@ public class BalanceSnapshotConfiguration : IEntityTypeConfiguration<BalanceSnap
     {
         builder.HasKey(b => b.Id);
         builder.Property(b => b.TotalValueUsdt).HasPrecision(18, 2);
-        builder.Property(b => b.Assets).HasColumnType("nvarchar(max)");
+        builder.Property(b => b.Assets).HasColumnType("longtext");
 
         builder.HasIndex(b => new { b.UserId, b.SnapshotAt });
 

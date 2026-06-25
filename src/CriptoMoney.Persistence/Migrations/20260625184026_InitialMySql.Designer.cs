@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CriptoMoney.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260625181418_InitialMySql")]
+    [Migration("20260625184026_InitialMySql")]
     partial class InitialMySql
     {
         /// <inheritdoc />
@@ -78,7 +78,7 @@ namespace CriptoMoney.Persistence.Migrations
 
                     b.Property<string>("CoinIds")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<decimal>("CommissionRate")
                         .HasPrecision(6, 5)
@@ -137,7 +137,7 @@ namespace CriptoMoney.Persistence.Migrations
 
                     b.Property<string>("StrategyConfig")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<decimal?>("TakeProfitPct")
                         .HasPrecision(5, 2)
@@ -211,7 +211,7 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasColumnType("datetime(6)");
 
                     b.Property<string>("IndicatorScores")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<decimal?>("PnlPct")
                         .HasPrecision(8, 4)
@@ -247,7 +247,7 @@ namespace CriptoMoney.Persistence.Migrations
 
                     b.Property<string>("Assets")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<DateTime>("SnapshotAt")
                         .HasColumnType("datetime(6)");
@@ -500,7 +500,7 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasColumnType("tinyint(1)");
 
                     b.Property<string>("Payload")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<DateTime?>("ReadAt")
                         .HasColumnType("datetime(6)");
@@ -777,7 +777,7 @@ namespace CriptoMoney.Persistence.Migrations
 
                     b.Property<string>("IndicatorScores")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<bool>("IsActedUpon")
                         .HasColumnType("tinyint(1)");
@@ -1021,7 +1021,7 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasColumnType("char(36)");
 
                     b.Property<string>("AllowedCoinIds")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<bool>("AutoTradePaused")
                         .HasColumnType("tinyint(1)");
@@ -1030,7 +1030,7 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasColumnType("datetime(6)");
 
                     b.Property<string>("BlockedCoinIds")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("longtext");
 
                     b.Property<bool>("CloseOnDisconnect")
                         .HasColumnType("tinyint(1)");
