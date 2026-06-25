@@ -23,7 +23,7 @@ public static class DependencyInjection
             .UseRecommendedSerializerSettings()
             .UseStorage(new MySqlStorage(connectionString, new MySqlStorageOptions
             {
-                QueuePollInterval = TimeSpan.Zero,
+                QueuePollInterval = TimeSpan.FromSeconds(15),
                 JobExpirationCheckInterval = TimeSpan.FromHours(1),
                 CountersAggregateInterval = TimeSpan.FromMinutes(5),
                 PrepareSchemaIfNecessary = true,
