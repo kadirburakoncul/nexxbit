@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(netstat -ano)",
+      "Bash(curl -s http://localhost:3000)",
+      "PowerShell(Get-Process -Id 2952)",
+      "Bash(curl -s http://localhost:3000/src/main.tsx)",
+      "Bash(curl -s \"http://localhost:3000/src/App.tsx\")"
+    ]
+  }
+}

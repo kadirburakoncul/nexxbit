@@ -1,0 +1,51 @@
+## .NET / ASP.NET Core
+bin/
+obj/
+*.user
+*.suo
+*.vs
+.vs/
+*.userprefs
+*.DotSettings.user
+TestResults/
+
+## Sensitive config — never commit these
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+**/appsettings.*.json
+!**/appsettings.json
+
+## EF Core migrations snapshot (optional — keep if you want migration history)
+# **/Migrations/
+
+## Node / Vite / React
+node_modules/
+web/dist/
+web/.env
+web/.env.local
+web/.env.development.local
+web/.env.test.local
+web/.env.production.local
+web/coverage/
+
+## Logs
+*.log
+logs/
+
+## OS
+.DS_Store
+Thumbs.db
+
+## IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+## NuGet
+*.nupkg
+.nuget/
+
+## Publish output
+publish/

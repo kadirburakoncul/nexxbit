@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0b0b0f;
+  color: #e2e8f0;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Select — force dark theme on native dropdown */
+select {
+  background-color: #1a1b23;
+  color-scheme: dark;
+}
+
+select option {
+  background-color: #1a1b23;
+  color: #e2e8f0;
+}
+
+select option:checked,
+select option:hover {
+  background-color: #2a2b38;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #12131a; }
+::-webkit-scrollbar-thumb { background: #2d2f3e; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3d3f52; }

@@ -1,0 +1,6 @@
+@CriptoMoney.Api_HostAddress = http://localhost:5248
+
+GET {{CriptoMoney.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
