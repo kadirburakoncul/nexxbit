@@ -28,8 +28,7 @@ public static class DependencyInjection
                 CountersAggregateInterval = TimeSpan.FromMinutes(5),
                 PrepareSchemaIfNecessary = true,
                 TransactionTimeout = TimeSpan.FromMinutes(1),
-                TablesPrefix = "Hangfire",
-                ConnectionString = connectionString
+                TablesPrefix = "Hangfire"
             })));
 
         services.AddHangfireServer(options =>
