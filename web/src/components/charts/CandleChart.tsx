@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { hubUrl } from '@/lib/config'
 import type { IChartApi, ISeriesApi } from 'lightweight-charts'
 import { createChart, CandlestickSeries, ColorType, CrosshairMode } from 'lightweight-charts'
 import { useQuery } from '@tanstack/react-query'
@@ -110,7 +111,7 @@ export default function CandleChart({ symbol, interval = '1h', height = 400 }: P
   }, [symbol, interval])
 
   useSignalR({
-    hubUrl: '/hubs/candles',
+    hubUrl: hubUrl('/hubs/candles'),
     events: { CandleUpdate: handleUpdate as (...args: unknown[]) => void },
     onConnected,
     enabled: !!symbol,

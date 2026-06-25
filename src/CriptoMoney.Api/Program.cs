@@ -113,7 +113,7 @@ builder.Services.AddSwaggerGen(c =>
 // CORS
 builder.Services.AddCors(opts =>
     opts.AddDefaultPolicy(policy =>
-        policy.WithOrigins("http://localhost:3000", "https://nexxbit.com.tr")
+        policy.WithOrigins("http://localhost:3000", "https://nexxbit.com.tr", "https://www.nexxbit.com.tr")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials()));

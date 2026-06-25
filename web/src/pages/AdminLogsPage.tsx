@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useSignalR } from '@/hooks/useSignalR'
+import { hubUrl } from '@/lib/config'
 import Header from '@/components/layout/Header'
 import { cn } from '@/lib/utils'
 import { Trash2, Pause, Play } from 'lucide-react'
@@ -41,7 +42,7 @@ export default function AdminLogsPage() {
   }, [])
 
   useSignalR({
-    hubUrl: '/hubs/logs',
+    hubUrl: hubUrl('/hubs/logs'),
     events: { log: handleLog },
   })
 
