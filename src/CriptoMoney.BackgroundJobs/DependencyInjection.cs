@@ -2,7 +2,7 @@ using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.BackgroundJobs.Jobs;
 using CriptoMoney.BackgroundJobs.Services;
 using Hangfire;
-using Hangfire.SqlServer;
+using Hangfire.MySql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,14 +21,15 @@ public static class DependencyInjection
             .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
             .UseSimpleAssemblyNameTypeSerializer()
             .UseRecommendedSerializerSettings()
-            .UseSqlServerStorage(connectionString, new SqlServerStorageOptions
+            .UseStorage(new MySqlStorage(connectionString, new MySqlStorageOptions
             {
-                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
-                SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
                 QueuePollInterval = TimeSpan.Zero,
-                UseRecommendedIsolationLevel = true,
-                DisableGlobalLocks = true,
-            }));
+                JobExpirationCheckInterval = TimeSpan.FromHours(1),
+                CountersAggregateInterval = TimeSpan.FromMinutes(5),
+                PrepareSchemaIfNecessary = true,
+                TransactionTimeout = TimeSpan.FromMinutes(1),
+                TablesPrefix = "Hangfire"
+            })));
 
         services.AddHangfireServer(options =>
         {

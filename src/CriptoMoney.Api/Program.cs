@@ -1,5 +1,6 @@
 using System.Text;
 using AspNetCoreRateLimit;
+using Microsoft.EntityFrameworkCore;
 using CriptoMoney.API.Hubs;
 using CriptoMoney.API.Logging;
 using CriptoMoney.API.Middleware;
@@ -112,7 +113,7 @@ builder.Services.AddSwaggerGen(c =>
 // CORS
 builder.Services.AddCors(opts =>
     opts.AddDefaultPolicy(policy =>
-        policy.WithOrigins("http://localhost:3000", "https://criptomoney.app")
+        policy.WithOrigins("http://localhost:3000", "https://nexxbit.com.tr")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials()));
@@ -123,10 +124,10 @@ builder.Services.AddSignalR();
 // Health checks
 builder.Services
     .AddHealthChecks()
-    .AddSqlServer(
+    .AddMySql(
         configuration.GetConnectionString("DefaultConnection") ?? "",
-        name: "sqlserver",
-        tags: ["db", "sql"])
+        name: "mysql",
+        tags: ["db", "mysql"])
     .AddCheck<BinanceHealthCheck>("binance", tags: ["external"])
     .AddHangfire(opts => opts.MinimumAvailableServers = 1, name: "hangfire", tags: ["jobs"]);
 
@@ -136,7 +137,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    await db.Database.MigrateAsync();
     await DatabaseSeeder.SeedAsync(db);
 }
 
