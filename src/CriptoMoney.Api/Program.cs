@@ -145,6 +145,10 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseSerilogRequestLogging();
 app.UseIpRateLimiting();
 
+// React SPA — önce statik dosyaları sun, API route'larını ezip geçme
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -159,6 +163,9 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<CandleHub>("/hubs/candle");
 app.MapHub<LogHub>("/hubs/logs");
+
+// React SPA fallback — /api veya /hubs olmayan tüm rotalar index.html'e düşer
+app.MapFallbackToFile("index.html");
 
 // Serilog'a SignalR sink'i ekle — app build'den sonra IHubContext hazır
 var logHubCtx = app.Services.GetRequiredService<IHubContext<LogHub>>();
