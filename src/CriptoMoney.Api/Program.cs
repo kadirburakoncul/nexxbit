@@ -218,10 +218,15 @@ if (app.Environment.IsDevelopment())
 }
 
 // Hangfire recurring job'larını kaydet
-using (var scope = app.Services.CreateScope())
+try
 {
+    using var scope = app.Services.CreateScope();
     var recurringManager = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
     CriptoMoney.BackgroundJobs.DependencyInjection.RegisterRecurringJobs(recurringManager);
+}
+catch (Exception ex)
+{
+    Log.Warning(ex, "Hangfire recurring job kaydı başarısız, uygulama devam ediyor.");
 }
 
 app.Run();
