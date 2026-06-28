@@ -15,7 +15,7 @@ public class BacktestEngine(
 {
     private const decimal TakerFee = 0.001m; // %0.1 varsayılan komisyon
 
-    public async Task RunAsync(BacktestRun run, CancellationToken ct = default)
+    public async Task RunAsync(BacktestRun run, CancellationToken ct = default, Func<int, Task>? onProgress = null)
     {
         run.Status = BacktestStatus.Running;
         await db.SaveChangesAsync(ct);
@@ -29,9 +29,13 @@ public class BacktestEngine(
             var coinIds = JsonSerializer.Deserialize<List<int>>(run.CoinIds) ?? [];
             var trades = new List<BacktestTrade>();
 
-            foreach (var coinId in coinIds)
+            for (var ci = 0; ci < coinIds.Count; ci++)
             {
                 if (ct.IsCancellationRequested) break;
+
+                var coinId = coinIds[ci];
+                if (onProgress != null)
+                    await onProgress((int)((ci * 100.0) / coinIds.Count));
 
                 var coin = await db.Coins.FindAsync([coinId], ct);
                 if (coin is null) continue;
@@ -120,13 +124,13 @@ public class BacktestEngine(
                     var exitReason = CheckExitConditions(openTrade, currentCandle, run, config);
                     if (exitReason.HasValue)
                     {
-                        ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, exitReason.Value, run.CommissionRate);
+                        ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, exitReason.Value, run.CommissionRate, run.SlippagePct);
                         openTrade = null;
                         continue;
                     }
                     if (sellSignal)
                     {
-                        ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, BacktestExitReason.Signal, run.CommissionRate);
+                        ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, BacktestExitReason.Signal, run.CommissionRate, run.SlippagePct);
                         openTrade = null;
                     }
                     continue;
@@ -136,14 +140,15 @@ public class BacktestEngine(
                 {
                     var quoteQty = CalculatePositionSize(run, trades);
                     if (quoteQty <= 0) continue;
+                    var entryPrice = currentPrice * (1m + run.SlippagePct / 100m);
                     openTrade = new BacktestTrade
                     {
                         BacktestRunId = run.Id,
                         CoinId = coin.Id,
                         Side = OrderSide.Buy,
                         EntryTime = currentCandle.OpenTime,
-                        EntryPrice = currentPrice,
-                        Quantity = quoteQty / currentPrice,
+                        EntryPrice = entryPrice,
+                        Quantity = quoteQty / entryPrice,
                         Commission = quoteQty * run.CommissionRate,
                         EntryScore = 1m,
                         IndicatorScores = $"{{\"T3\":{t3vals[^1]:F8},\"EMA200\":{ema200[^1]:F8}}}",
@@ -161,7 +166,7 @@ public class BacktestEngine(
                 var exitReason = CheckExitConditions(openTrade, currentCandle, run, config);
                 if (exitReason.HasValue)
                 {
-                    ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, exitReason.Value, run.CommissionRate);
+                    ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, exitReason.Value, run.CommissionRate, run.SlippagePct);
                     openTrade = null;
                     continue;
                 }
@@ -169,7 +174,7 @@ public class BacktestEngine(
                 var exitScore = CalculateScore(windowScoring, indicators);
                 if (exitScore <= config.SellThreshold)
                 {
-                    ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, BacktestExitReason.Signal, run.CommissionRate);
+                    ClosePosition(openTrade, currentPrice, currentCandle.OpenTime, BacktestExitReason.Signal, run.CommissionRate, run.SlippagePct);
                     openTrade = null;
                 }
                 continue;
@@ -182,7 +187,8 @@ public class BacktestEngine(
                 var quoteQty = CalculatePositionSize(run, trades);
                 if (quoteQty <= 0) continue;
 
-                var qty = quoteQty / currentPrice;
+                var entryPrice = currentPrice * (1m + run.SlippagePct / 100m);
+                var qty = quoteQty / entryPrice;
                 var commission = quoteQty * run.CommissionRate;
 
                 openTrade = new BacktestTrade
@@ -191,7 +197,7 @@ public class BacktestEngine(
                     CoinId = coin.Id,
                     Side = OrderSide.Buy,
                     EntryTime = currentCandle.OpenTime,
-                    EntryPrice = currentPrice,
+                    EntryPrice = entryPrice,
                     Quantity = qty,
                     Commission = commission,
                     EntryScore = Math.Round(score, 4),
@@ -205,7 +211,7 @@ public class BacktestEngine(
         if (openTrade is not null && openTrade.ExitTime is null && allCandles.Count > 0)
         {
             var last = allCandles[^1];
-            ClosePosition(openTrade, last.Close, last.OpenTime, BacktestExitReason.EndOfData, run.CommissionRate);
+            ClosePosition(openTrade, last.Close, last.OpenTime, BacktestExitReason.EndOfData, run.CommissionRate, run.SlippagePct);
         }
 
         logger.LogInformation("Backtest {Symbol}: {Count} işlem", coin.Symbol, trades.Count);
@@ -236,9 +242,11 @@ public class BacktestEngine(
     }
 
     private static void ClosePosition(
-        BacktestTrade trade, decimal exitPrice, DateTime exitTime,
-        BacktestExitReason reason, decimal commissionRate)
+        BacktestTrade trade, decimal rawExitPrice, DateTime exitTime,
+        BacktestExitReason reason, decimal commissionRate, decimal slippagePct = 0m)
     {
+        // Satışta slippage: gerçek fill biraz daha düşük
+        var exitPrice = rawExitPrice * (1m - slippagePct / 100m);
         trade.ExitTime = exitTime;
         trade.ExitPrice = exitPrice;
         trade.ExitReason = reason;

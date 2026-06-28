@@ -22,10 +22,10 @@ export default function Header({ title }: { title?: string }) {
   }
 
   return (
-    <header className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-[#0b0b0f]/80 backdrop-blur sticky top-0 z-10">
+    <header className="h-14 border-b border-white/5 flex items-center justify-between px-3 md:px-6 bg-[#0b0b0f]/80 backdrop-blur sticky top-0 z-10">
       <h1 className="text-sm font-semibold text-slate-200">{title}</h1>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1 md:gap-3">
         {/* Notification bell */}
         <button
           onClick={() => navigate('/notifications')}
@@ -37,8 +37,8 @@ export default function Header({ title }: { title?: string }) {
           )}
         </button>
 
-        {/* User */}
-        <div className="flex items-center gap-2 text-sm text-slate-400">
+        {/* User — name hidden on mobile */}
+        <div className="hidden sm:flex items-center gap-2 text-sm text-slate-400">
           <User size={16} />
           <span>{user?.firstName} {user?.lastName}</span>
         </div>

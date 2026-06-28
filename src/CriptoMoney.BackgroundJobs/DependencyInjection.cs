@@ -3,6 +3,7 @@ using CriptoMoney.BackgroundJobs.Jobs;
 using CriptoMoney.BackgroundJobs.Services;
 using Hangfire;
 using Hangfire.MemoryStorage;
+using Hangfire.MySql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -14,11 +15,36 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddHangfire(config => config
-            .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
-            .UseSimpleAssemblyNameTypeSerializer()
-            .UseRecommendedSerializerSettings()
-            .UseMemoryStorage());
+        var connStr = configuration.GetConnectionString("DefaultConnection");
+
+        services.AddHangfire(config =>
+        {
+            config
+                .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+                .UseSimpleAssemblyNameTypeSerializer()
+                .UseRecommendedSerializerSettings();
+
+            if (!string.IsNullOrEmpty(connStr))
+            {
+                try
+                {
+                    config.UseStorage(new MySqlStorage(connStr, new MySqlStorageOptions
+                    {
+                        TablesPrefix = "Hangfire_",
+                        PrepareSchemaIfNecessary = true,
+                        QueuePollInterval = TimeSpan.FromSeconds(15),
+                    }));
+                }
+                catch
+                {
+                    config.UseMemoryStorage();
+                }
+            }
+            else
+            {
+                config.UseMemoryStorage();
+            }
+        });
 
         services.AddHangfireServer(options =>
         {
@@ -42,6 +68,7 @@ public static class DependencyInjection
             job => job.ExecuteAsync(CancellationToken.None),
             "* * * * *",
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+
 
         manager.AddOrUpdate<BalanceSnapshotJob>(
             "balance-snapshot",

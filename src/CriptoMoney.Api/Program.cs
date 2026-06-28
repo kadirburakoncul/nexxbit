@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using AspNetCoreRateLimit;
 using Microsoft.EntityFrameworkCore;
 using CriptoMoney.API.Hubs;
@@ -43,6 +44,7 @@ builder.Services.AddScoped<IAutoTradeService, AutoTradeService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<ICandleHubNotifier, CandleHubNotifier>();
+builder.Services.AddScoped<CriptoMoney.Application.Common.Interfaces.IBacktestProgressNotifier, CriptoMoney.API.Hubs.BacktestProgressNotifier>();
 
 // JWT Authentication
 var jwtKey = configuration["Jwt:SecretKey"]
@@ -81,11 +83,41 @@ builder.Services.AddAuthorization(opts =>
     opts.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
 });
 
-// Rate limiting
+// IP tabanlı rate limiting
 builder.Services.AddMemoryCache();
 builder.Services.Configure<IpRateLimitOptions>(configuration.GetSection("IpRateLimiting"));
 builder.Services.AddInMemoryRateLimiting();
 builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+
+// User bazlı rate limiting (JWT user ID ile partition)
+builder.Services.AddRateLimiter(opts =>
+{
+    opts.RejectionStatusCode = 429;
+    // Genel API kullanıcı limiti: 60 req/dk
+    opts.AddPolicy("user-general", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: ctx.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                Window = TimeSpan.FromMinutes(1),
+                SegmentsPerWindow = 6,
+                PermitLimit = 60,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
+            }));
+    // Backtest limiti: 5 başlatma/5dk
+    opts.AddPolicy("backtest", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: ctx.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anon",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                Window = TimeSpan.FromMinutes(5),
+                SegmentsPerWindow = 5,
+                PermitLimit = 5,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
+            }));
+});
 
 // Controllers + Swagger
 builder.Services.AddControllers();
@@ -129,6 +161,7 @@ builder.Services
         name: "mysql",
         tags: ["db", "mysql"])
     .AddCheck<BinanceHealthCheck>("binance", tags: ["external"])
+    .AddCheck<MigrationHealthCheck>("migrations", tags: ["db"])
     .AddHangfire(opts => opts.MinimumAvailableServers = 1, name: "hangfire", tags: ["jobs"]);
 
 var app = builder.Build();
@@ -137,21 +170,24 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     try
     {
         await db.Database.MigrateAsync();
         await DatabaseSeeder.SeedAsync(db);
+        MigrationHealthCheck.ReportSuccess();
     }
     catch (Exception ex)
     {
-        var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        startupLogger.LogWarning(ex, "Migration/Seed sırasında hata oluştu, uygulama devam ediyor.");
+        MigrationHealthCheck.ReportFailure(ex);
+        startupLogger.LogError(ex, "Migration/Seed başarısız — uygulama degraded modda devam ediyor.");
     }
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseSerilogRequestLogging();
 app.UseIpRateLimiting();
+app.UseRateLimiter();
 
 // React SPA — önce statik dosyaları sun, API route'larını ezip geçme
 app.UseDefaultFiles();
@@ -171,6 +207,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<CandleHub>("/hubs/candle");
 app.MapHub<LogHub>("/hubs/logs");
+app.MapHub<BacktestHub>("/hubs/backtest");
 
 // React SPA fallback — /api veya /hubs olmayan tüm rotalar index.html'e düşer
 app.MapFallbackToFile("index.html");

@@ -19,9 +19,9 @@ public static class EmailTemplates
     private static string Wrap(string title, string body) =>
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>" + Css + "</style></head><body>" +
         "<div class=\"container\">" +
-        "<div class=\"header\"><h1>CriptoMoney &mdash; " + title + "</h1></div>" +
+        "<div class=\"header\"><h1>NEXXBIT &mdash; " + title + "</h1></div>" +
         "<div class=\"content\">" + body + "</div>" +
-        "<div class=\"footer\">Bu e-posta otomatik oluşturulmuştur. CriptoMoney &mdash; Withdrawal yetkisi kullanılmaz.</div>" +
+        "<div class=\"footer\">Bu e-posta otomatik oluşturulmuştur. NEXXBIT &mdash; Withdrawal yetkisi kullanılmaz.</div>" +
         "</div></body></html>";
 
     public static string DailyReport(

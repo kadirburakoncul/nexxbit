@@ -1,3 +1,4 @@
+using CriptoMoney.Application.Features.Auth.Commands.ChangePassword;
 using CriptoMoney.Application.Features.Auth.Commands.ForgotPassword;
 using CriptoMoney.Application.Features.Auth.Commands.Login;
 using CriptoMoney.Application.Features.Auth.Commands.Logout;
@@ -5,6 +6,7 @@ using CriptoMoney.Application.Features.Auth.Commands.RefreshToken;
 using CriptoMoney.Application.Features.Auth.Commands.Register;
 using CriptoMoney.Application.Features.Auth.Commands.ResetPassword;
 using CriptoMoney.Application.Features.Auth.Commands.VerifyEmail;
+using CriptoMoney.Application.Features.Auth.Commands.VerifyLoginOtp;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -34,6 +36,16 @@ public class AuthController(IMediator mediator) : ControllerBase
         if (!result.Succeeded)
             return Unauthorized(new { errors = result.Errors });
 
+        return Ok(result.Data);
+    }
+
+    [HttpPost("verify-login-otp")]
+    [AllowAnonymous]
+    public async Task<IActionResult> VerifyLoginOtp([FromBody] VerifyLoginOtpCommand command, CancellationToken ct)
+    {
+        var result = await mediator.Send(command, ct);
+        if (!result.Succeeded)
+            return Unauthorized(new { errors = result.Errors });
         return Ok(result.Data);
     }
 
@@ -90,8 +102,25 @@ public class AuthController(IMediator mediator) : ControllerBase
 
         return Ok(new { message = "Şifreniz başarıyla güncellendi." });
     }
+
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken ct)
+    {
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+        if (userIdClaim is null || !Guid.TryParse(userIdClaim.Value, out var userId))
+            return Unauthorized();
+
+        var result = await mediator.Send(new ChangePasswordCommand(userId, request.CurrentPassword, request.NewPassword), ct);
+        if (!result.Succeeded)
+            return BadRequest(new { errors = result.Errors });
+
+        return Ok(new { message = "Şifreniz başarıyla güncellendi." });
+    }
 }
 
 public record VerifyEmailRequest(string Token);
 public record ForgotPasswordRequest(string Email);
 public record ResetPasswordRequest(string Token, string NewPassword);
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);

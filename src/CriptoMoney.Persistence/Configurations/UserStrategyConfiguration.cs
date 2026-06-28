@@ -12,6 +12,8 @@ public class UserStrategyConfiguration : IEntityTypeConfiguration<UserStrategy>
         builder.Property(s => s.Name).HasMaxLength(100).IsRequired();
         builder.Property(s => s.Timeframe).HasMaxLength(5).IsRequired();
         builder.Property(s => s.Ema200Timeframe).HasMaxLength(5).IsRequired();
+        builder.Property(s => s.TakeProfitPct).HasPrecision(5, 2);
+        builder.Property(s => s.MinVolumeUsdt).HasPrecision(18, 2);
         builder.Property(s => s.BuyThreshold).HasPrecision(5, 2);
         builder.Property(s => s.SellThreshold).HasPrecision(5, 2);
         builder.Property(s => s.StrongSellThreshold).HasPrecision(5, 2);

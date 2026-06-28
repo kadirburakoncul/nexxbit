@@ -69,6 +69,7 @@ public class IndicatorController(IMediator mediator, IApplicationDbContext db) :
     }
 
     [HttpPut("{indicatorId:int}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> UpdateIndicator(
         int indicatorId,
         [FromBody] UpdateIndicatorRequest req,

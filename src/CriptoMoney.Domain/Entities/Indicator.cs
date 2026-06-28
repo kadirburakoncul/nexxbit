@@ -6,6 +6,7 @@ public class Indicator : BaseEntity
     public string Name { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? HowItWorks { get; set; }
     public string Category { get; set; } = string.Empty;
     public string ClassName { get; set; } = string.Empty;
     public decimal DefaultWeight { get; set; } = 1.0m;

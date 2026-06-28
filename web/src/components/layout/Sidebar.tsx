@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, TrendingUp, LineChart, Bell, Settings,
   Wifi, FlaskConical, Shield, Users, CandlestickChart, Terminal,
-  BarChart3, Cpu, Sliders, ClipboardList, Radar
+  BarChart3, Cpu, Sliders, ClipboardList, Radar, Flame
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -18,6 +18,7 @@ const navItems = [
   { to: '/backtest',   icon: FlaskConical,    label: 'Backtest'    },
   { to: '/indicators', icon: Cpu,             label: 'İndikatörler'},
   { to: '/strategies', icon: Sliders,         label: 'Stratejiler' },
+  { to: '/volatile',   icon: Flame,           label: 'Volatil Mod' },
   { to: '/notifications', icon: Bell,         label: 'Bildirimler' },
   { to: '/settings',   icon: Settings,        label: 'Ayarlar'     },
   { to: '/binance',    icon: Wifi,            label: 'Binance'     },
@@ -33,7 +34,7 @@ export default function Sidebar() {
   const isAdmin = useAuthStore(s => s.isAdmin)()
 
   return (
-    <aside className="w-56 shrink-0 bg-[#0f1117] border-r border-white/5 flex flex-col h-screen sticky top-0">
+    <aside className="hidden md:flex md:flex-col w-56 shrink-0 bg-[#0f1117] border-r border-white/5 h-screen sticky top-0">
       {/* Logo */}
       <div className="px-5 py-4 border-b border-white/5">
         <span className="text-lg tracking-tight font-light">

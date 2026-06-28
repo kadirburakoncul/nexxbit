@@ -1,4 +1,4 @@
-using CriptoMoney.Application.Common.Interfaces;
+﻿using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Common.Models;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -11,21 +11,15 @@ public class GetCoinsQueryHandler(IApplicationDbContext db)
     public async Task<Result<List<CoinDto>>> Handle(
         GetCoinsQuery request, CancellationToken cancellationToken)
     {
-        var watchlistIds = await db.UserWatchlists
+        var coinIds = await db.UserWatchlists
             .Where(w => w.UserId == request.UserId)
             .Select(w => w.CoinId)
-            .ToHashSetAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
 
         var coins = await db.Coins
-            .Where(c => c.IsActive)
+            .Where(c => c.IsActive && coinIds.Contains(c.Id))
             .OrderBy(c => c.Symbol)
-            .Select(c => new CoinDto(
-                c.Id,
-                c.Symbol,
-                c.BaseAsset,
-                c.QuoteAsset,
-                c.DisplayName,
-                watchlistIds.Contains(c.Id)))
+            .Select(c => new CoinDto(c.Id, c.Symbol, c.BaseAsset, c.QuoteAsset, c.DisplayName, true))
             .ToListAsync(cancellationToken);
 
         return Result<List<CoinDto>>.Success(coins);

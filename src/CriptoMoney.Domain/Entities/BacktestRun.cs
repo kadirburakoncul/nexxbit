@@ -13,6 +13,7 @@ public class BacktestRun : BaseEntity
     public DateTime EndDate { get; set; }
     public decimal InitialCapital { get; set; }
     public decimal CommissionRate { get; set; } = 0.001m;
+    public decimal SlippagePct { get; set; } = 0.05m;
     public decimal? StopLossPct { get; set; }
     public decimal? TakeProfitPct { get; set; }
     public string StrategyConfig { get; set; } = "{}";

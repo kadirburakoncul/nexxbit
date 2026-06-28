@@ -38,6 +38,7 @@ public class GetUsersQueryHandler(IApplicationDbContext db)
                 u.LastName,
                 u.Role,
                 u.IsEmailVerified,
+                u.SkipLoginOtp,
                 u.IsDeleted,
                 u.BinanceAccount != null,
                 u.CreatedAt,

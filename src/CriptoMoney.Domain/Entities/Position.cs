@@ -7,6 +7,7 @@ public class Position : BaseEntity
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid UserId { get; set; }
     public int CoinId { get; set; }
+    public Guid? StrategyId { get; set; }
     public Guid? EntryOrderId { get; set; }
     public decimal EntryPrice { get; set; }
     public decimal EntryQuantity { get; set; }
@@ -22,6 +23,9 @@ public class Position : BaseEntity
     public decimal? RealizedPnl { get; set; }
     public decimal? RealizedPnlPct { get; set; }
     public bool IsVirtual { get; set; } = false;
+    public bool IsPartialTpHit { get; set; } = false;
+    public decimal? PartialTpHitPrice { get; set; }
+    public decimal? PartialRealizedPnlPct { get; set; }
     public DateTime OpenedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ClosedAt { get; set; }
     public string? CloseReason { get; set; }

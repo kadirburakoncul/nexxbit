@@ -49,3 +49,10 @@ Thumbs.db
 
 ## Publish output
 publish/
+publish_out/
+
+## Deploy artifacts (contain credentials)
+deploy.py
+migration_latest.sql
+*.zip
+nexxbit/

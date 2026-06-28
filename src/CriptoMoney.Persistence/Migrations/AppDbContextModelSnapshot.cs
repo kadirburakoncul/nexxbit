@@ -122,6 +122,9 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasPrecision(8, 4)
                         .HasColumnType("decimal(8,4)");
 
+                    b.Property<decimal>("SlippagePct")
+                        .HasColumnType("decimal(65,30)");
+
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("datetime(6)");
 
@@ -405,6 +408,9 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
 
+                    b.Property<string>("HowItWorks")
+                        .HasColumnType("longtext");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("tinyint(1)");
 
@@ -573,11 +579,20 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasPrecision(28, 8)
                         .HasColumnType("decimal(28,8)");
 
+                    b.Property<bool>("IsPartialTpHit")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<bool>("IsVirtual")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<DateTime>("OpenedAt")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<decimal?>("PartialRealizedPnlPct")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal?>("PartialTpHitPrice")
+                        .HasColumnType("decimal(65,30)");
 
                     b.Property<decimal?>("RealizedPnl")
                         .HasPrecision(28, 8)
@@ -593,6 +608,9 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<decimal?>("StopLossPrice")
                         .HasPrecision(28, 8)
                         .HasColumnType("decimal(28,8)");
+
+                    b.Property<Guid?>("StrategyId")
+                        .HasColumnType("char(36)");
 
                     b.Property<decimal?>("TakeProfitPrice")
                         .HasPrecision(28, 8)
@@ -625,6 +643,22 @@ namespace CriptoMoney.Persistence.Migrations
                     b.HasIndex("UserId", "CoinId", "Status");
 
                     b.ToTable("Positions");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.SystemConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("RequireLoginOtp")
+                        .HasColumnType("tinyint(1)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SystemConfigs");
                 });
 
             modelBuilder.Entity("CriptoMoney.Domain.Entities.SystemLog", b =>
@@ -862,6 +896,12 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
 
+                    b.Property<string>("LoginOtpCode")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("LoginOtpExpiry")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -882,6 +922,9 @@ namespace CriptoMoney.Persistence.Migrations
 
                     b.Property<int>("Role")
                         .HasColumnType("int");
+
+                    b.Property<bool>("SkipLoginOtp")
+                        .HasColumnType("tinyint(1)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
@@ -1011,6 +1054,37 @@ namespace CriptoMoney.Persistence.Migrations
                     b.ToTable("UserIndicatorSettings");
                 });
 
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.UserIndicatorSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("IndicatorId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IndicatorId");
+
+                    b.HasIndex("UserId", "IndicatorId")
+                        .IsUnique();
+
+                    b.ToTable("UserIndicatorSubscriptions");
+                });
+
             modelBuilder.Entity("CriptoMoney.Domain.Entities.UserRiskSettings", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1084,6 +1158,15 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("TelegramBotToken")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("TelegramChatId")
+                        .HasColumnType("longtext");
+
+                    b.Property<bool>("TelegramEnabled")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<int>("TradeMode")
                         .HasColumnType("int");
 
@@ -1109,6 +1192,15 @@ namespace CriptoMoney.Persistence.Migrations
 
                     b.Property<DateTime?>("ActivatedAt")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<int>("AtrPeriod")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("AtrSlMultiplier")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal>("AtrTpMultiplier")
+                        .HasColumnType("decimal(65,30)");
 
                     b.Property<decimal>("BuyThreshold")
                         .HasPrecision(5, 2)
@@ -1143,10 +1235,32 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<bool>("IsRealTradeEnabled")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<bool>("IsRsiFilterEnabled")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("IsVolatileMode")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("IsVolumeSurgeFilterEnabled")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<decimal?>("MinVolumeUsdt")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("MomentumFreshFilterMinutes")
+                        .HasColumnType("int");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
+
+                    b.Property<decimal>("PartialTpClosePct")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal?>("PartialTpPct")
+                        .HasColumnType("decimal(65,30)");
 
                     b.Property<decimal>("SellThreshold")
                         .HasPrecision(5, 2)
@@ -1156,6 +1270,10 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasColumnType("decimal(65,30)");
 
                     b.Property<decimal>("StrongSellThreshold")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal?>("TakeProfitPct")
                         .HasPrecision(5, 2)
                         .HasColumnType("decimal(5,2)");
 
@@ -1170,8 +1288,26 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<bool>("UseAtrBasedStops")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("UseMarketRegimeFilter")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("char(36)");
+
+                    b.Property<int>("VolatileGainerLimit")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("VolatileMinChangePct")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal?>("VolatilePositionSizePct")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal>("VolumeSurgeMultiplier")
+                        .HasColumnType("decimal(65,30)");
 
                     b.HasKey("Id");
 
@@ -1457,6 +1593,25 @@ namespace CriptoMoney.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Coin");
+
+                    b.Navigation("Indicator");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.UserIndicatorSubscription", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.Indicator", "Indicator")
+                        .WithMany()
+                        .HasForeignKey("IndicatorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CriptoMoney.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Indicator");
 

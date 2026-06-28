@@ -15,17 +15,23 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         services.AddSingleton<IJwtService, JwtService>();
+        services.AddSingleton<ITelegramService, TelegramService>();
+        services.AddHttpClient("telegram").ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler());
+        services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
         services.AddSingleton<IEncryptionService, EncryptionService>();
         services.AddScoped<IBinanceService, BinanceService>();
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddSingleton<IBinanceStreamService, BinanceStreamService>();
 
-        // İndikatörler — her biri Singleton (durumsuz hesaplama)
-        services.AddSingleton<IIndicator, TillsonIndicator>();
+        // İndikatörler — sadece Level1 (T3 tabanlı) aktif
+        services.AddSingleton<IIndicator, Level1Indicator>();
+        services.AddSingleton<IIndicator, RsiIndicator>();
         services.AddSingleton<IIndicatorRegistry, IndicatorRegistry>();
         services.AddScoped<ISignalEngine, SignalEngine>();
         services.AddScoped<IBacktestEngine, BacktestEngine>();
         services.AddScoped<FlashCrashDetector>();
+        services.AddSingleton<MomentumTracker>();
+        services.AddSingleton<MarketRegimeService>();
         services.AddHostedService<TrailingStopMonitorService>();
 
         var redisConn = configuration.GetConnectionString("Redis");

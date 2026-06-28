@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { tradesApi } from '@/api/trades'
 import { coinsApi } from '@/api/coins'
@@ -69,15 +69,42 @@ export default function TradesPage() {
   })
 
   const watchCoinId = watch('coinId')
-  const selectedCoin = coins?.find(c => c.id === Number(watchCoinId))
-  if (selectedCoin) setValue('symbol', selectedCoin.symbol)
-
   const watchSide = watch('side')
+
+  useEffect(() => {
+    const coin = coins?.find(c => c.id === Number(watchCoinId))
+    if (coin) setValue('symbol', coin.symbol)
+  }, [watchCoinId, coins, setValue])
+
+  // Özet istatistikler
+  const filled = orders?.filter(o => o.status === 1) ?? []
+  const totalBuys = filled.filter(o => o.side === 0).length
+  const totalSells = filled.filter(o => o.side === 1).length
+  const totalPnl = filled.reduce((s, o) => s + (o.realizedPnl ?? 0), 0)
+  const autoCount = filled.filter(o => o.isAutomatic).length
 
   return (
     <>
-      <Header title="Emir Geçmişi" />
-      <div className="p-6 space-y-6 max-w-5xl">
+      <Header title="İşlem Günlüğü" />
+      <div className="p-3 md:p-6 space-y-4 md:space-y-6 max-w-5xl">
+
+        {/* Özet kartlar */}
+        {filled.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {[
+              { label: 'Toplam Emir', value: filled.length.toString() },
+              { label: 'Al', value: totalBuys.toString(), cls: 'text-emerald-400' },
+              { label: 'Sat', value: totalSells.toString(), cls: 'text-red-400' },
+              { label: 'Otomatik', value: autoCount.toString(), cls: 'text-yellow-400' },
+              { label: 'Net P&L', value: (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' $', cls: totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400' },
+            ].map(c => (
+              <div key={c.label} className="bg-white/5 border border-white/5 rounded-xl p-4">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider">{c.label}</p>
+                <p className={`text-base font-bold mt-1 ${c.cls ?? 'text-slate-200'}`}>{c.value}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Manuel Emir Formu */}
         <div className="bg-white/5 border border-white/5 rounded-xl p-5">
@@ -93,13 +120,13 @@ export default function TradesPage() {
 
           <form
             onSubmit={handleSubmit(d => placeOrder.mutate({ ...d, side: Number(d.side), coinId: Number(d.coinId), quoteQty: Number(d.quoteQty) }))}
-            className="grid grid-cols-4 gap-4 items-end"
+            className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end"
           >
             <div>
               <label className="block text-xs text-slate-400 mb-1">Coin</label>
               <select {...register('coinId')} className={inputCls}>
                 <option value="">Seçin…</option>
-                {coins?.map(c => <option key={c.id} value={c.id}>{c.symbol}</option>)}
+                {coins?.filter(c => c.isInWatchlist).map(c => <option key={c.id} value={c.id}>{c.symbol}</option>)}
               </select>
               {errors.coinId && <p className="text-xs text-red-400 mt-1">{errors.coinId.message}</p>}
             </div>
@@ -146,7 +173,7 @@ export default function TradesPage() {
             className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none"
           >
             <option value="">Tüm Coinler</option>
-            {coins?.map(c => <option key={c.id} value={c.id}>{c.symbol}</option>)}
+            {coins?.filter(c => c.isInWatchlist).map(c => <option key={c.id} value={c.id}>{c.symbol}</option>)}
           </select>
           <select
             value={filterStatus}
@@ -161,12 +188,13 @@ export default function TradesPage() {
         </div>
 
         {/* Orders table */}
-        <div className="bg-white/5 border border-white/5 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-white/5 border border-white/5 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[620px]">
             <thead>
               <tr className="border-b border-white/5 text-xs text-slate-500 uppercase">
                 <th className="text-left px-5 py-3">Coin</th>
                 <th className="text-left px-5 py-3">Yön</th>
+                <th className="text-left px-5 py-3">Kaynak</th>
                 <th className="text-right px-5 py-3">Adet</th>
                 <th className="text-right px-5 py-3">Fiyat</th>
                 <th className="text-right px-5 py-3">P&L</th>
@@ -176,10 +204,10 @@ export default function TradesPage() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {isLoading && (
-                <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-500">Yükleniyor…</td></tr>
+                <tr><td colSpan={8} className="px-5 py-8 text-center text-slate-500">Yükleniyor…</td></tr>
               )}
               {!isLoading && orders?.length === 0 && (
-                <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-500">Emir bulunamadı.</td></tr>
+                <tr><td colSpan={8} className="px-5 py-8 text-center text-slate-500">Emir bulunamadı.</td></tr>
               )}
               {orders?.map(o => {
                 const side = ORDER_SIDE[o.side] ?? ORDER_SIDE[0]
@@ -191,6 +219,14 @@ export default function TradesPage() {
                     <td className="px-5 py-3">
                       <span className={cn('flex items-center gap-1.5 font-medium', side.color)}>
                         <SideIcon size={12} />{side.label}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium',
+                        o.isAutomatic
+                          ? 'bg-yellow-400/10 text-yellow-400 border-yellow-400/20'
+                          : 'bg-slate-500/20 text-slate-400 border-slate-500/20')}>
+                        {o.isAutomatic ? 'Otomatik' : 'Manuel'}
                       </span>
                     </td>
                     <td className="px-5 py-3 text-right font-mono text-slate-300">{o.quantity.toFixed(6)}</td>

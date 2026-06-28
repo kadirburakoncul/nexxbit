@@ -142,7 +142,7 @@ public class BinanceService(
     }
 
     public async Task<Result<PlaceOrderResult>> PlaceMarketOrderAsync(
-        Guid userId, string symbol, OrderSide side, decimal quoteQty, CancellationToken ct = default)
+        Guid userId, string symbol, OrderSide side, decimal qty, CancellationToken ct = default)
     {
         var (client, error) = await GetAuthenticatedClientAsync(userId, ct);
         if (client is null)
@@ -152,10 +152,15 @@ public class BinanceService(
         {
             var binanceSide = side == OrderSide.Buy ? Binance.Net.Enums.OrderSide.Buy : Binance.Net.Enums.OrderSide.Sell;
 
-            // Market order: quoteOrderQty ile gönder (USDT miktarı)
-            var result = await client.SpotApi.Trading.PlaceOrderAsync(
-                symbol, binanceSide, SpotOrderType.Market,
-                quoteQuantity: quoteQty, ct: ct);
+            // BUY: quoteOrderQty = USDT miktarı harca
+            // SELL: quantity = satılacak coin miktarı
+            var result = side == OrderSide.Buy
+                ? await client.SpotApi.Trading.PlaceOrderAsync(
+                    symbol, binanceSide, SpotOrderType.Market,
+                    quoteQuantity: qty, ct: ct)
+                : await client.SpotApi.Trading.PlaceOrderAsync(
+                    symbol, binanceSide, SpotOrderType.Market,
+                    quantity: qty, ct: ct);
 
             if (!result.Success)
             {
@@ -199,13 +204,86 @@ public class BinanceService(
         }
     }
 
+    public async Task<decimal> GetCoinBalanceAsync(Guid userId, string asset, CancellationToken ct = default)
+    {
+        var (client, _) = await GetAuthenticatedClientAsync(userId, ct);
+        if (client is null) return 0;
+
+        using (client)
+        {
+            var result = await client.SpotApi.Account.GetAccountInfoAsync(ct: ct);
+            if (!result.Success) return 0;
+            return result.Data.Balances.FirstOrDefault(b => b.Asset == asset)?.Available ?? 0;
+        }
+    }
+
     public async Task<decimal?> GetCurrentPriceAsync(string symbol, CancellationToken ct = default)
     {
-        // Public endpoint — auth gerekmez
         using var client = BinanceClientFactory.CreatePublicRest();
         var result = await client.SpotApi.ExchangeData.GetPriceAsync(symbol, ct: ct);
         if (!result.Success) return null;
         return result.Data.Price;
+    }
+
+    public async Task<Dictionary<string, decimal>> GetBulkPricesAsync(
+        IEnumerable<string> symbols, CancellationToken ct = default)
+    {
+        var symbolList = symbols.ToList();
+        if (symbolList.Count == 0) return new Dictionary<string, decimal>();
+        try
+        {
+            using var client = BinanceClientFactory.CreatePublicRest();
+            var result = await client.SpotApi.ExchangeData.GetPricesAsync(symbolList, ct: ct);
+            if (!result.Success) return new Dictionary<string, decimal>();
+            return result.Data.ToDictionary(p => p.Symbol, p => p.Price);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "GetBulkPricesAsync hatası — fallback single-call");
+            var prices = new Dictionary<string, decimal>();
+            foreach (var sym in symbolList)
+            {
+                var p = await GetCurrentPriceAsync(sym, ct);
+                if (p.HasValue) prices[sym] = p.Value;
+            }
+            return prices;
+        }
+    }
+
+    public async Task<List<MomentumCoin>> GetTopGainersAsync(
+        decimal minChangePercent = 3m, int limit = 25, CancellationToken ct = default)
+    {
+        try
+        {
+            using var client = BinanceClientFactory.CreatePublicRest();
+            var result = await client.SpotApi.ExchangeData.GetTickersAsync(ct: ct);
+            if (!result.Success)
+            {
+                logger.LogWarning("GetTopGainersAsync başarısız: {Error}", result.Error?.Message);
+                return [];
+            }
+
+            return result.Data
+                .Where(t => t.Symbol.EndsWith("USDT")
+                         && t.PriceChangePercent >= minChangePercent
+                         && t.QuoteVolume >= 1_000_000m)
+                .OrderByDescending(t => t.PriceChangePercent)
+                .Take(limit)
+                .Select(t => new MomentumCoin(
+                    t.Symbol,
+                    t.Symbol[..^4], // "BTCUSDT" → "BTC"
+                    Math.Round(t.PriceChangePercent, 2),
+                    t.LastPrice,
+                    Math.Round(t.QuoteVolume, 0),
+                    t.HighPrice,
+                    t.LowPrice))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "GetTopGainersAsync exception");
+            return [];
+        }
     }
 
     private async Task<(Binance.Net.Clients.BinanceRestClient? client, string? error)> GetAuthenticatedClientAsync(

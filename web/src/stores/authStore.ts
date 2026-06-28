@@ -14,7 +14,11 @@ function decodeJwt(token: string): JwtPayload | null {
   try {
     const payload = token.split('.')[1]
     const padded = payload + '='.repeat((4 - payload.length % 4) % 4)
-    return JSON.parse(atob(padded.replace(/-/g, '+').replace(/_/g, '/')))
+    const base64 = padded.replace(/-/g, '+').replace(/_/g, '/')
+    const jsonStr = decodeURIComponent(
+      atob(base64).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
+    )
+    return JSON.parse(jsonStr)
   } catch {
     return null
   }

@@ -12,6 +12,7 @@ public class SignalEngine(
     IApplicationDbContext db,
     IBinanceService binance,
     IIndicatorRegistry registry,
+    MarketRegimeService marketRegime,
     ILogger<SignalEngine> logger) : ISignalEngine
 {
     private const int CandleFetchLimit = 500;
@@ -49,12 +50,6 @@ public class SignalEngine(
                 && s.IsEnabled)
             .ToListAsync(ct);
 
-        if (userSettings.Count == 0)
-        {
-            logger.LogDebug("Aktif indikatör yok: userId={UserId}", userId);
-            return null;
-        }
-
         // 3. Candle verisi çek
         var candleResult = await binance.GetCandlesAsync(symbol, timeframe, CandleFetchLimit, ct);
         if (!candleResult.Succeeded || candleResult.Data is null)
@@ -67,81 +62,21 @@ public class SignalEngine(
             .Select(c => new CandleInput(c.OpenTime, c.Open, c.High, c.Low, c.Close, c.Volume))
             .ToList();
 
-        // 4. İndikatör modu tespiti
-        var hasT3   = userSettings.Any(s => s.Indicator.Name.Equals("Tillson",  StringComparison.OrdinalIgnoreCase) ||
-                                             s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase));
-        var hasEma  = userSettings.Any(s => s.Indicator.Name.Equals("Ema200",   StringComparison.OrdinalIgnoreCase));
+        // 4. İndikatör modu tespiti — Level1 her zaman aktif (tek indikatör)
+        var hasLevel1 = userSettings.Count == 0 || userSettings.Any(s =>
+            s.Indicator.Name.Equals("Level1",   StringComparison.OrdinalIgnoreCase) ||
+            s.Indicator.Name.Equals("Tillson",  StringComparison.OrdinalIgnoreCase) ||
+            s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase));
+        var hasEma    = userSettings.Any(s => s.Indicator.Name.Equals("Ema200", StringComparison.OrdinalIgnoreCase));
 
-        // Sadece T3 aktif → Easy İndikatör modu (pure T3)
-        if (hasT3 && !hasEma)
+        if (hasLevel1 && !hasEma)
             return await GenerateT3OnlySignalAsync(userId, coinId, strategy, candles, userSettings, ct);
 
-        // T3 + EMA200 → kombine mod
-        if (hasT3 && hasEma)
+        if (hasLevel1 && hasEma)
             return await GenerateT3Ema200SignalAsync(userId, coinId, strategy, candles, userSettings, ct);
 
-        // 5. Skor tabanlı mod
-        var indicatorScores = new Dictionary<string, decimal>();
-        var totalWeightedScore = 0m;
-        var totalWeight = 0m;
-
-        foreach (var setting in userSettings)
-        {
-            var indicator = registry.Resolve(setting.Indicator.Name);
-            if (indicator is null)
-            {
-                logger.LogWarning("İndikatör bulunamadı registry'de: {Name}", setting.Indicator.Name);
-                continue;
-            }
-
-            if (candles.Count < indicator.MinCandlesRequired)
-            {
-                logger.LogDebug("Yetersiz mum: {Name} için {Min} gerekli, {Got} var", indicator.Name, indicator.MinCandlesRequired, candles.Count);
-                continue;
-            }
-
-            var parameters = BuildParameters(setting);
-
-            try
-            {
-                var result = indicator.Calculate(candles, parameters);
-                var weight = setting.Weight > 0 ? setting.Weight : setting.Indicator.DefaultWeight;
-                indicatorScores[result.IndicatorName] = result.Score;
-                totalWeightedScore += result.Score * weight;
-                totalWeight += weight;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "İndikatör hesaplama hatası: {Name}", indicator.Name);
-            }
-        }
-
-        if (totalWeight == 0) return null;
-
-        var normalizedScore = totalWeightedScore / totalWeight;
-
-        if (strategy.IsEma200RuleEnabled)
-            normalizedScore = ApplyEma200Rule(normalizedScore, candles, strategy);
-
-        var direction = normalizedScore >= strategy.BuyThreshold ? SignalDirection.Buy
-            : normalizedScore <= strategy.StrongSellThreshold ? SignalDirection.StrongSell
-            : normalizedScore <= strategy.SellThreshold ? SignalDirection.Sell
-            : SignalDirection.Hold;
-
-        var lastCandle = candles[^1];
-
-        return new TradeSignal
-        {
-            UserId = userId,
-            CoinId = coinId,
-            StrategyId = strategy.Id,
-            Timeframe = timeframe,
-            Direction = direction,
-            TotalScore = Math.Round(normalizedScore, 4),
-            CandleTime = lastCandle.OpenTime,
-            Price = lastCandle.Close,
-            IndicatorScores = JsonSerializer.Serialize(indicatorScores),
-        };
+        // Fallback: herhangi bir indikatör seçili değilse Level1 ile çalış
+        return await GenerateT3OnlySignalAsync(userId, coinId, strategy, candles, userSettings, ct);
     }
 
     /// <summary>
@@ -155,34 +90,49 @@ public class SignalEngine(
         List<UserIndicatorSetting> settings,
         CancellationToken ct)
     {
-        // [^1] = açık (kapanmamış) mum; yön tespiti için son kapanmış mum [^2] kullanılır
-        // Mum kapanmadan sinyal üretilmemesi için en az 5 mum gerekiyor ([^2],[^3],[^4])
-        if (candles.Count < 11) return null;
+        // [^1] açık mum; sinyal için son 2 kapanmış bar kullanılır ([^2],[^3],[^4],[^5])
+        // 2-bar konfirmasyon için ^5 gerekiyor
+        if (candles.Count < 12) return null;
 
         var t3Setting = settings.FirstOrDefault(s =>
             s.Indicator.Name.Equals("Tillson", StringComparison.OrdinalIgnoreCase) ||
-            s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase));
+            s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase) ||
+            s.Indicator.Name.Equals("Level1", StringComparison.OrdinalIgnoreCase));
 
         var t3Params = t3Setting is not null ? BuildParameters(t3Setting) : new Dictionary<string, string>();
-        var t3Period = t3Params.TryGetValue("Period", out var p) ? int.Parse(p) : 3;
+        var isLevel1 = t3Setting?.Indicator.Name.Equals("Level1", StringComparison.OrdinalIgnoreCase) == true;
+        var t3Period = t3Params.TryGetValue("Period", out var p) ? int.Parse(p) : (isLevel1 ? 5 : 3);
         var t3Factor = t3Params.TryGetValue("Factor", out var f)
             ? decimal.Parse(f, System.Globalization.CultureInfo.InvariantCulture) : 0.7m;
 
         var src  = candles.Select(c => (c.High + c.Low + 2m * c.Close) / 4m).ToArray();
         var t3   = TillsonIndicator.ComputeT3(src, t3Period, t3Factor);
 
-        // Kapanmış son mum: [^2]; açık mum: [^1] (henüz kapanmadı — sinyal için kullanılmaz)
-        var t3UpCurr   = t3[^2] > t3[^3];
-        var t3UpPrev   = t3[^3] > t3[^4];
-        var t3TurnUp   = t3UpCurr && !t3UpPrev;
-        var t3TurnDown = !t3UpCurr && t3UpPrev;
+        // 2-bar konfirmasyon: dönüş [^3]'te başladı, [^2] onayladı, [^4]>[^5] eski yön
+        // BUY:  [^4]↓→[^3]↑ (dönüş bar) + [^2]↑ (onay bar)
+        // SELL: [^4]↑→[^3]↓ (dönüş bar) + [^2]↓ (onay bar)
+        var t3TurnUp   = t3[^3] > t3[^4] && !(t3[^4] > t3[^5]) && t3[^2] > t3[^3];
+        var t3TurnDown = !(t3[^3] > t3[^4]) && t3[^4] > t3[^5]  && !(t3[^2] > t3[^3]);
 
-        var lastCandle = candles[^2]; // son kapanmış mum
+        var lastCandle = candles[^2]; // son kapanmış mum (onay bar)
         var closePrice = lastCandle.Close;
 
         // Tek sorgu — tüm dallarda kullanılacak
         var strategyCoin = await db.UserStrategyCoins
             .FirstOrDefaultAsync(sc => sc.UserStrategyId == strategy.Id && sc.CoinId == coinId, ct);
+
+        // Volatile mod: kayıt yoksa ilk işlemde otomatik oluştur
+        // Bu sayede LastCheckedAt/Reason takibi ve ReEntryState mekanizması çalışır
+        if (strategyCoin is null && strategy.IsVolatileMode)
+        {
+            strategyCoin = new UserStrategyCoin
+            {
+                UserStrategyId = strategy.Id,
+                CoinId = coinId,
+                ReEntryState = ReEntryState.Normal,
+            };
+            db.UserStrategyCoins.Add(strategyCoin);
+        }
 
         // lastCheckedAt'i her çalışmada güncelle (sinyal olsun ya da olmasın)
         if (strategyCoin is not null)
@@ -195,10 +145,61 @@ public class SignalEngine(
         {
             if (strategyCoin is not null)
             {
-                strategyCoin.LastCheckedReason = $"T3 {(t3UpCurr ? "yükseliyor" : "düşüyor")} — yön değişimi yok";
+                strategyCoin.LastCheckedReason = $"T3 {(t3[^2] > t3[^3] ? "yükseliyor" : "düşüyor")} — 2-bar konfirmasyon yok";
                 await db.SaveChangesAsync(ct);
             }
             return null;
+        }
+
+        // Hacim filtresi: minimum eşik kontrolü
+        if (t3TurnUp && strategy.MinVolumeUsdt.HasValue)
+        {
+            var avgVolUsdt = candles.TakeLast(24).Average(c => c.Volume * c.Close);
+            if (avgVolUsdt < strategy.MinVolumeUsdt.Value)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason =
+                        $"AL sinyali var ama hacim yetersiz: {avgVolUsdt:F0} USDT < {strategy.MinVolumeUsdt.Value:F0} USDT";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("Hacim filtresi: CoinId={Id} hacim={Vol:F0} USDT, min={Min:F0} USDT", coinId, avgVolUsdt, strategy.MinVolumeUsdt.Value);
+                return null;
+            }
+        }
+
+        // Hacim artışı filtresi: son bar hacmi 20-bar ortalamasının N katını geçmeli
+        if (t3TurnUp && strategy.IsVolumeSurgeFilterEnabled)
+        {
+            var avgVol20 = candles.TakeLast(21).SkipLast(1).Average(c => c.Volume);
+            var lastVol  = candles[^2].Volume;
+            var required = avgVol20 * strategy.VolumeSurgeMultiplier;
+            if (lastVol < required)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason = $"AL var ama volume surge yok: {lastVol:F0} < {required:F0} (20-bar avg×{strategy.VolumeSurgeMultiplier})";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("Volume surge filtresi: CoinId={Id} vol={V:F0} gerekli={R:F0}", coinId, lastVol, required);
+                return null;
+            }
+        }
+
+        // Piyasa rejimi filtresi: bear market'ta AL sinyali blokla
+        if (t3TurnUp && strategy.UseMarketRegimeFilter)
+        {
+            var isBull = await marketRegime.GetMarketRegimeAsync(ct);
+            if (!isBull)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason = "AL sinyali var ama piyasa rejimi BEAR — bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("Market regime filtresi: bear market, AL bloklandı. CoinId={Id}", coinId);
+                return null;
+            }
         }
 
         // Strateji aktive edilmeden önce oluşan T3 dönüşlerini yoksay
@@ -223,12 +224,25 @@ public class SignalEngine(
         {
             case Domain.Enums.ReEntryState.Normal:
                 if (t3TurnUp && !hasOpenPosition)
+                {
                     dir = SignalDirection.Buy;
+                    if (strategyCoin is not null)
+                    {
+                        strategyCoin.LastCheckedReason = "AL sinyali üretildi";
+                        await db.SaveChangesAsync(ct);
+                    }
+                }
                 else if (t3TurnDown && hasOpenPosition)
+                {
                     dir = SignalDirection.Sell;
+                    if (strategyCoin is not null)
+                    {
+                        strategyCoin.LastCheckedReason = "SAT sinyali üretildi";
+                        await db.SaveChangesAsync(ct);
+                    }
+                }
                 else if (strategyCoin is not null)
                 {
-                    // T3 döndü ama pozisyon durumu uyumsuz (örn. T3 yukarı ama pozisyon zaten açık)
                     strategyCoin.LastCheckedReason = t3TurnUp
                         ? "T3 yukarı döndü — pozisyon zaten açık"
                         : "T3 aşağı döndü — açık pozisyon yok";
@@ -272,12 +286,36 @@ public class SignalEngine(
 
         if (dir is null) return null;
 
+        // RSI filtresi (stratejide açıksa — T3 AL sinyalini RSI>50 ile onaylar)
+        decimal? rsiValue = null;
+        if (strategy.IsRsiFilterEnabled)
+        {
+            var rsiArr = RsiIndicator.ComputeRsi(candles.Select(c => c.Close).ToArray(), 14);
+            rsiValue = Math.Round(rsiArr[^2], 2);
+
+            if (dir == SignalDirection.Buy && rsiValue < 50)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason = $"T3 yukarı döndü ama RSI {rsiValue:F1} < 50 — AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("RSI filtresi AL bloklandı: CoinId={Id} RSI={RSI:F1}", coinId, rsiValue);
+                return null;
+            }
+        }
+
+        // ATR değerini signal'e göm — AutoTradeService ATR tabanlı SL/TP için kullanır
+        var atr = Indicators.TechnicalUtils.ComputeAtr(candles, strategy.AtrPeriod > 0 ? strategy.AtrPeriod : 14);
+
         var scores = new Dictionary<string, decimal>
         {
             ["T3"]         = Math.Round(t3[^1], 8),
             ["T3TurnUp"]   = t3TurnUp   ? 1 : 0,
             ["T3TurnDown"] = t3TurnDown ? 1 : 0,
+            ["ATR"]        = atr,
         };
+        if (rsiValue.HasValue) scores["RSI"] = rsiValue.Value;
 
         logger.LogInformation("T3 Easy sinyali: Coin={CoinId} {Dir} (T3={T3:F6} close={C:F6})",
             coinId, dir, t3[^1], closePrice);
@@ -308,8 +346,8 @@ public class SignalEngine(
         List<UserIndicatorSetting> settings,
         CancellationToken ct)
     {
-        // [^1] açık mum; yön tespiti kapanmış [^2] üzerinden yapılır → 204 mum gerekli
-        if (candles.Count < 204) return null;
+        // [^1] açık mum; 2-bar konfirmasyon için [^5] gerekiyor → 205 mum minimum
+        if (candles.Count < 205) return null;
 
         // T3 parametrelerini settings'den oku
         var t3Setting = settings.FirstOrDefault(s =>
@@ -327,42 +365,136 @@ public class SignalEngine(
         var t3     = TillsonIndicator.ComputeT3(src, t3Period, t3Factor);
         var ema200 = ComputeEma(closes, 200);
 
-        // Kapanmış son mum [^2]; açık mum [^1] sinyal tespitinde kullanılmaz
-        var t3UpCurr = t3[^2] > t3[^3];
-        var t3UpPrev = t3[^3] > t3[^4];
-        var t3TurnUp   = t3UpCurr && !t3UpPrev;
-        var t3TurnDown = !t3UpCurr && t3UpPrev;
+        // 2-bar konfirmasyon: dönüş [^3]'te, onay [^2]'de
+        var t3TurnUp   = t3[^3] > t3[^4] && !(t3[^4] > t3[^5]) && t3[^2] > t3[^3];
+        var t3TurnDown = !(t3[^3] > t3[^4]) && t3[^4] > t3[^5]  && !(t3[^2] > t3[^3]);
 
-        var lastCandle  = candles[^2]; // son kapanmış mum
+        var lastCandle  = candles[^2];
         var closePrice  = lastCandle.Close;
         var ema200Last  = ema200[^2];
 
         var buySignal  = t3TurnUp   && closePrice > ema200Last;
         var sellSignal = t3TurnDown || closePrice < ema200Last;
 
+        // Takip kaydı — volatile modda yoksa oluştur
+        var strategyCoinEma = await db.UserStrategyCoins
+            .FirstOrDefaultAsync(sc => sc.UserStrategyId == strategy.Id && sc.CoinId == coinId, ct);
+
+        if (strategyCoinEma is null && strategy.IsVolatileMode)
+        {
+            strategyCoinEma = new UserStrategyCoin
+            {
+                UserStrategyId = strategy.Id,
+                CoinId = coinId,
+                ReEntryState = ReEntryState.Normal,
+            };
+            db.UserStrategyCoins.Add(strategyCoinEma);
+        }
+
+        if (strategyCoinEma is not null)
+        {
+            strategyCoinEma.LastCheckedAt = DateTime.UtcNow;
+            strategyCoinEma.LastCheckedPrice = closePrice;
+        }
+
         if (!buySignal && !sellSignal)
+        {
+            if (strategyCoinEma is not null)
+            {
+                strategyCoinEma.LastCheckedReason = $"T3+EMA200: koşul yok (T3 {(t3[^2] > t3[^3] ? "↑" : "↓")}, fiyat {(closePrice > ema200Last ? ">" : "<")} EMA200)";
+                await db.SaveChangesAsync(ct);
+            }
             return null;
+        }
+
+        // Hacim filtresi: sadece AL sinyalinde kontrol et
+        if (buySignal && strategy.MinVolumeUsdt.HasValue)
+        {
+            var avgVolUsdt = candles.TakeLast(24).Average(c => c.Volume * c.Close);
+            if (avgVolUsdt < strategy.MinVolumeUsdt.Value)
+            {
+                if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason =
+                        $"T3+EMA200 AL var ama hacim yetersiz: {avgVolUsdt:F0} < {strategy.MinVolumeUsdt.Value:F0} USDT";
+                    await db.SaveChangesAsync(ct);
+                }
+                return null;
+            }
+        }
 
         // Açık pozisyon kontrolü (PineScript "inTrade" karşılığı)
         var hasOpenPosition = await db.Positions
             .AnyAsync(pos => pos.UserId == userId && pos.CoinId == coinId && pos.Status == Domain.Enums.PositionStatus.Open, ct);
 
+        // ReEntryState kontrolü
+        var reEntryEma = strategyCoinEma?.ReEntryState ?? ReEntryState.Normal;
+        switch (reEntryEma)
+        {
+            case ReEntryState.WaitingForSell:
+                if (t3TurnDown)
+                {
+                    if (strategyCoinEma is not null)
+                    {
+                        strategyCoinEma.ReEntryState = ReEntryState.WaitingForBuy;
+                        strategyCoinEma.LastCheckedReason = "T3+EMA200: SAT sinyali alındı → AL bekleniyor";
+                        await db.SaveChangesAsync(ct);
+                    }
+                }
+                else if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason = "T3+EMA200: Manuel satış sonrası SAT bekleniyor";
+                    await db.SaveChangesAsync(ct);
+                }
+                return null;
+
+            case ReEntryState.WaitingForBuy:
+                if (!buySignal)
+                {
+                    if (strategyCoinEma is not null)
+                    {
+                        strategyCoinEma.LastCheckedReason = "T3+EMA200: AL bekleniyor (SAT döngüsü tamamlandı)";
+                        await db.SaveChangesAsync(ct);
+                    }
+                    return null;
+                }
+                if (strategyCoinEma is not null)
+                    strategyCoinEma.ReEntryState = ReEntryState.Normal;
+                break;
+        }
+
         SignalDirection? dir = null;
         if (buySignal  && !hasOpenPosition) dir = SignalDirection.Buy;
         if (sellSignal &&  hasOpenPosition) dir = SignalDirection.Sell;
 
-        if (dir is null) return null;
+        if (strategyCoinEma is not null)
+        {
+            strategyCoinEma.LastCheckedReason = dir.HasValue
+                ? $"T3+EMA200: {dir} sinyali üretildi"
+                : $"T3+EMA200: koşul var ama pozisyon durumu uyumsuz";
+        }
 
+        if (dir is null)
+        {
+            await db.SaveChangesAsync(ct);
+            return null;
+        }
+
+        var atrEma = Indicators.TechnicalUtils.ComputeAtr(candles, strategy.AtrPeriod > 0 ? strategy.AtrPeriod : 14);
         var scores = new Dictionary<string, decimal>
         {
-            ["T3"]    = Math.Round(t3[^1], 8),
-            ["EMA200"] = Math.Round(ema200Last, 8),
+            ["T3"]         = Math.Round(t3[^1], 8),
+            ["EMA200"]     = Math.Round(ema200Last, 8),
             ["T3TurnUp"]   = t3TurnUp   ? 1 : 0,
             ["T3TurnDown"] = t3TurnDown ? 1 : 0,
+            ["ATR"]        = atrEma,
         };
 
         logger.LogInformation("T3+EMA200 sinyali: {Symbol} {Dir} (T3={T3:F4} EMA={EMA:F4} close={C:F4})",
             strategy.Coin?.Symbol ?? coinId.ToString(), dir, t3[^1], ema200Last, closePrice);
+
+        if (strategyCoinEma is not null)
+            await db.SaveChangesAsync(ct);
 
         return new TradeSignal
         {
@@ -390,17 +522,18 @@ public class SignalEngine(
             .Select(c => new CandleInput(c.OpenTime, c.Open, c.High, c.Low, c.Close, c.Volume))
             .ToList();
 
-        // T3 parametrelerini kullanıcı ayarından al (yoksa default)
+        // T3 parametrelerini kullanıcı ayarından al (Level1 veya eski Tillson ayarı)
         var t3Setting = await db.UserIndicatorSettings
             .Include(s => s.Indicator)
             .Include(s => s.ParameterValues).ThenInclude(v => v.ParameterDefinition)
             .Where(s => s.UserId == userId && s.IsEnabled &&
-                (s.Indicator.Name.Equals("Tillson", StringComparison.OrdinalIgnoreCase) ||
+                (s.Indicator.Name.Equals("Level1", StringComparison.OrdinalIgnoreCase) ||
+                 s.Indicator.Name.Equals("Tillson", StringComparison.OrdinalIgnoreCase) ||
                  s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase)))
             .FirstOrDefaultAsync(ct);
 
         var t3Params = t3Setting is not null ? BuildParameters(t3Setting) : new Dictionary<string, string>();
-        var t3Period = t3Params.TryGetValue("Period", out var p) ? int.Parse(p) : 3;
+        var t3Period = t3Params.TryGetValue("Period", out var p) ? int.Parse(p) : 5;
         var t3Factor = t3Params.TryGetValue("Factor", out var f)
             ? decimal.Parse(f, System.Globalization.CultureInfo.InvariantCulture) : 0.7m;
 
@@ -485,12 +618,13 @@ public class SignalEngine(
             .Select(c => new CandleInput(c.OpenTime, c.Open, c.High, c.Low, c.Close, c.Volume))
             .ToList();
 
-        // T3 + EMA200 ikisi aktifse PineScript doğrudan analiz modu
-        var analyzeHasT3  = userSettings.Any(s => s.Indicator.Name.Equals("Tillson",  StringComparison.OrdinalIgnoreCase) ||
-                                                   s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase));
-        var analyzeHasEma = userSettings.Any(s => s.Indicator.Name.Equals("Ema200",   StringComparison.OrdinalIgnoreCase));
+        var analyzeHasLevel1 = userSettings.Count == 0 || userSettings.Any(s =>
+            s.Indicator.Name.Equals("Level1",    StringComparison.OrdinalIgnoreCase) ||
+            s.Indicator.Name.Equals("Tillson",   StringComparison.OrdinalIgnoreCase) ||
+            s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase));
+        var analyzeHasEma = userSettings.Any(s => s.Indicator.Name.Equals("Ema200", StringComparison.OrdinalIgnoreCase));
 
-        if (analyzeHasT3 && analyzeHasEma)
+        if (analyzeHasLevel1 && analyzeHasEma)
             return await AnalyzeT3Ema200Async(userId, coinId, symbol, timeframe, strategy, candles, userSettings, ct);
 
         var indicatorResults = new List<SignalIndicatorResult>();
@@ -570,11 +704,12 @@ public class SignalEngine(
                 $"Yetersiz mum verisi: {candles.Count}/203 gerekli.", null, null, null, false, null, []);
 
         var t3Setting = settings.FirstOrDefault(s =>
-            s.Indicator.Name.Equals("Tillson", StringComparison.OrdinalIgnoreCase) ||
+            s.Indicator.Name.Equals("Level1",    StringComparison.OrdinalIgnoreCase) ||
+            s.Indicator.Name.Equals("Tillson",   StringComparison.OrdinalIgnoreCase) ||
             s.Indicator.Name.Equals("TillsonT3", StringComparison.OrdinalIgnoreCase));
 
         var t3Params = t3Setting is not null ? BuildParameters(t3Setting) : new Dictionary<string, string>();
-        var t3Period = t3Params.TryGetValue("Period", out var p) ? int.Parse(p) : 3;
+        var t3Period = t3Params.TryGetValue("Period", out var p) ? int.Parse(p) : 5;
         var t3Factor = t3Params.TryGetValue("Factor", out var f)
             ? decimal.Parse(f, System.Globalization.CultureInfo.InvariantCulture) : 0.7m;
 

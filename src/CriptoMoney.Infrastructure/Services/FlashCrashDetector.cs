@@ -13,6 +13,7 @@ namespace CriptoMoney.Infrastructure.Services;
 public class FlashCrashDetector(
     IApplicationDbContext db,
     IBinanceService binance,
+    ITelegramService telegram,
     ILogger<FlashCrashDetector> logger)
 {
     private const string ReferenceSymbol = "BTCUSDT";
@@ -40,7 +41,7 @@ public class FlashCrashDetector(
     }
 
     private async Task ProcessUserSettingAsync(
-        UserRiskSettings setting, decimal currentPrice, CancellationToken ct)
+        UserRiskSettings setting, decimal currentPrice, CancellationToken ct = default)
     {
         // Referans fiyat: windowMinutes önce
         var windowMinutes = Math.Max(setting.FlashCrashWindowMinutes, 1);
@@ -63,7 +64,6 @@ public class FlashCrashDetector(
                 "Flash crash tespit edildi! BTC {Window}dk'da %{Drop:F2} düştü. UserId={UserId} — FullAuto durduruldu.",
                 windowMinutes, dropPct, setting.UserId);
 
-            // Kullanıcıya bildirim
             db.Notifications.Add(new Notification
             {
                 UserId = setting.UserId,
@@ -71,10 +71,19 @@ public class FlashCrashDetector(
                 Title = "Flash Crash Koruması Aktif",
                 Body = $"BTC son {windowMinutes} dakikada %{dropPct:F2} düştü. Otomatik işlemler durduruldu.",
             });
+
+            if (setting.TelegramEnabled
+                && !string.IsNullOrWhiteSpace(setting.TelegramBotToken)
+                && !string.IsNullOrWhiteSpace(setting.TelegramChatId))
+            {
+                await telegram.SendAsync(setting.TelegramBotToken, setting.TelegramChatId,
+                    $"🚨 <b>Flash Crash Koruması Aktif!</b>\n" +
+                    $"BTC son {windowMinutes} dk'da %{dropPct:F2} düştü.\n" +
+                    $"Otomatik işlemler durduruldu.", ct);
+            }
         }
         else if (dropPct < setting.FlashCrashDropPct * 0.5m && setting.AutoTradePaused)
         {
-            // Fiyat yeterince toparlandıysa otomatik devam et
             setting.AutoTradePaused = false;
             setting.AutoTradePausedAt = null;
 
@@ -88,6 +97,15 @@ public class FlashCrashDetector(
                 Title = "Otomatik İşlemler Devam Ediyor",
                 Body = "Piyasa toparlandı. Otomatik işlemler yeniden etkinleştirildi.",
             });
+
+            if (setting.TelegramEnabled
+                && !string.IsNullOrWhiteSpace(setting.TelegramBotToken)
+                && !string.IsNullOrWhiteSpace(setting.TelegramChatId))
+            {
+                await telegram.SendAsync(setting.TelegramBotToken, setting.TelegramChatId,
+                    $"✅ <b>Flash Crash Koruması Kaldırıldı</b>\n" +
+                    $"Piyasa toparlandı. Otomatik işlemler devam ediyor.", ct);
+            }
         }
     }
 }

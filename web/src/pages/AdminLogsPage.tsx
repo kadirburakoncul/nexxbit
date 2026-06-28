@@ -60,7 +60,7 @@ export default function AdminLogsPage() {
   return (
     <>
       <Header title="Admin — Canlı Loglar" />
-      <div className="p-6 space-y-3 flex flex-col h-[calc(100vh-3.5rem)]">
+      <div className="p-3 md:p-6 space-y-3 flex flex-col h-[calc(100vh-3.5rem)]">
         {/* Toolbar */}
         <div className="flex items-center gap-3 shrink-0">
           <input

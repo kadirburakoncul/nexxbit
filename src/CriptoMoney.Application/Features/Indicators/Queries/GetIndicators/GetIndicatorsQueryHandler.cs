@@ -25,11 +25,18 @@ public class GetIndicatorsQueryHandler(IApplicationDbContext db)
                 && (s.CoinId == request.CoinId || s.CoinId == null))
             .ToListAsync(cancellationToken);
 
+        // Kullanıcının aboneliklerini yükle
+        var subscriptions = await db.UserIndicatorSubscriptions
+            .Where(s => s.UserId == request.UserId)
+            .ToListAsync(cancellationToken);
+
         var settingsMap = userSettings.ToDictionary(s => s.IndicatorId);
+        var subscriptionMap = subscriptions.ToDictionary(s => s.IndicatorId);
 
         var result = indicators.Select(indicator =>
         {
             var setting = settingsMap.GetValueOrDefault(indicator.Id);
+            var subscription = subscriptionMap.GetValueOrDefault(indicator.Id);
             var paramValues = setting?.ParameterValues.ToDictionary(pv => pv.ParameterDefinitionId)
                               ?? new Dictionary<int, Domain.Entities.UserIndicatorParameterValue>();
 
@@ -49,10 +56,14 @@ public class GetIndicatorsQueryHandler(IApplicationDbContext db)
                 indicator.Name,
                 indicator.DisplayName,
                 indicator.Description ?? string.Empty,
+                indicator.HowItWorks,
                 indicator.Category,
                 setting?.IsEnabled ?? true,
                 setting?.Weight ?? indicator.DefaultWeight,
-                parameters
+                parameters,
+                subscription != null,
+                subscription?.IsActive ?? false,
+                subscription?.ExpiresAt
             );
         }).ToList();
 

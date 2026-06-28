@@ -39,7 +39,10 @@ public class GetRiskSettingsQueryHandler(IApplicationDbContext db)
             r.AutoTradePaused,
             r.AutoTradePausedAt,
             ParseIds(r.AllowedCoinIds),
-            ParseIds(r.BlockedCoinIds)));
+            ParseIds(r.BlockedCoinIds),
+            r.TelegramEnabled,
+            r.TelegramBotToken,
+            r.TelegramChatId));
     }
 
     private static List<int> ParseIds(string? json) =>

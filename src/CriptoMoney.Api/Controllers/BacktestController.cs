@@ -5,6 +5,7 @@ using CriptoMoney.Application.Features.Backtest.Queries.ListBacktestRuns;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 
 namespace CriptoMoney.API.Controllers;
@@ -25,6 +26,7 @@ public class BacktestController(IMediator mediator) : ControllerBase
     }
 
     [HttpPost]
+    [EnableRateLimiting("backtest")]
     public async Task<IActionResult> Start([FromBody] StartBacktestRequest req, CancellationToken ct)
     {
         var result = await mediator.Send(new StartBacktestCommand(
@@ -36,6 +38,7 @@ public class BacktestController(IMediator mediator) : ControllerBase
             req.EndDate,
             req.InitialCapital,
             req.CommissionRate,
+            req.SlippagePct,
             req.StopLossPct,
             req.TakeProfitPct,
             req.StrategyConfig ?? "{}"
@@ -69,6 +72,7 @@ public record StartBacktestRequest(
     DateTime EndDate,
     decimal InitialCapital,
     decimal CommissionRate = 0.001m,
+    decimal SlippagePct = 0.05m,
     decimal? StopLossPct = null,
     decimal? TakeProfitPct = null,
     string? StrategyConfig = null

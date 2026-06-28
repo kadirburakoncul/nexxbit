@@ -55,17 +55,16 @@ export function computeT3(candles: BKline[], period: number, vFactor: number): T
   const c3 = -6 * v2 - 3 * vFactor - 3 * v3, c4 = 1 + 3 * vFactor + v3 + 3 * v2
   const values = e1.map((_, i) => c1 * e6[i] + c2 * e5[i] + c3 * e4[i] + c4 * e3[i])
   const n = values.length
+  // Tüm hesaplamalar kapalı mum üzerinden — backend ile tam senkron
   // [n-1] = açık (kapanmamış) mum, [n-2] = son kapanmış mum
-  // Yön değişimi tespiti için kapanmış mum kullan; böylece mum kapanmadan önce sahte sinyal üretilmez
-  const liveT3Up   = values[n - 1] > values[n - 2]   // canlı yön (badge için)
-  const closedT3Up = values[n - 2] > values[n - 3]   // kapanmış mum yönü (sinyal için)
+  const closedT3Up = values[n - 2] > values[n - 3]
   const prevT3Up   = values[n - 3] > values[n - 4]
   return {
     values,
-    currentT3Up: liveT3Up,
+    currentT3Up: closedT3Up,
     t3TurnUp:   closedT3Up && !prevT3Up,
     t3TurnDown: !closedT3Up && prevT3Up,
-    currentT3: values[n - 1],
+    currentT3: values[n - 2],
   }
 }
 

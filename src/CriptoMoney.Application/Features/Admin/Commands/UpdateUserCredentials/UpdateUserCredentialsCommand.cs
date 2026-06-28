@@ -11,7 +11,7 @@ public record UpdateUserCredentialsCommand(
     string? NewPassword
 ) : IRequest<Result>;
 
-public class UpdateUserCredentialsCommandHandler(IApplicationDbContext db)
+public class UpdateUserCredentialsCommandHandler(IApplicationDbContext db, IPasswordHasher passwordHasher)
     : IRequestHandler<UpdateUserCredentialsCommand, Result>
 {
     public async Task<Result> Handle(UpdateUserCredentialsCommand request, CancellationToken ct)
@@ -36,7 +36,7 @@ public class UpdateUserCredentialsCommandHandler(IApplicationDbContext db)
             if (request.NewPassword.Length < 6)
                 return Result.Failure("Şifre en az 6 karakter olmalıdır.");
 
-            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         }
 
         await db.SaveChangesAsync(ct);

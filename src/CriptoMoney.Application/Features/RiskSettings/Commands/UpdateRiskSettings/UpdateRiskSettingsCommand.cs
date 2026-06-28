@@ -19,5 +19,8 @@ public record UpdateRiskSettingsCommand(
     bool CloseOnDisconnect,
     bool FlashCrashProtectionEnabled = true,
     decimal FlashCrashDropPct = 5.0m,
-    int FlashCrashWindowMinutes = 15
+    int FlashCrashWindowMinutes = 15,
+    bool TelegramEnabled = false,
+    string? TelegramBotToken = null,
+    string? TelegramChatId = null
 ) : IRequest<Result>;

@@ -27,5 +27,8 @@ public record RiskSettingsDto(
     bool AutoTradePaused,
     DateTime? AutoTradePausedAt,
     List<int> AllowedCoinIds,
-    List<int> BlockedCoinIds
+    List<int> BlockedCoinIds,
+    bool TelegramEnabled,
+    string? TelegramBotToken,
+    string? TelegramChatId
 );

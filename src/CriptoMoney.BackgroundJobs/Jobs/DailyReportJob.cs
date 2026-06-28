@@ -1,6 +1,6 @@
+using CriptoMoney.Application.Common.Email;
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Domain.Enums;
-using CriptoMoney.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -87,16 +87,17 @@ public class DailyReportJob(
             openPositions);
 
         await emailService.SendAsync(user.Email,
-            $"CriptoMoney — {from:dd MMM yyyy} Günlük Rapor",
+            $"Nexxbit — {from:dd MMM yyyy} Günlük Rapor",
             html, ct);
 
-        // Uygulama içi bildirim de oluştur
+        var pnlSign = realizedPnl >= 0 ? "+" : "";
         db.Notifications.Add(new Domain.Entities.Notification
         {
             UserId = userId,
             Type = NotificationType.DailyReport,
-            Title = "Günlük Rapor Hazır",
-            Body = $"{from:dd.MM.yyyy} günü: {totalSignals} sinyal, {filledOrders} emir, {realizedPnl:+0.00;-0.00;0} USDT P&L",
+            Title = $"Günlük Rapor — {from:dd MMM yyyy}",
+            Body = $"{totalSignals} sinyal üretildi, {filledOrders} emir gerçekleşti. " +
+                   $"Günlük P&L: {pnlSign}{realizedPnl:F2} USDT · Açık pozisyon: {openPositions}",
         });
         await db.SaveChangesAsync(ct);
     }

@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<IndicatorParameterDefinition> IndicatorParameterDefinitions => Set<IndicatorParameterDefinition>();
     public DbSet<UserIndicatorSetting> UserIndicatorSettings => Set<UserIndicatorSetting>();
     public DbSet<UserIndicatorParameterValue> UserIndicatorParameterValues => Set<UserIndicatorParameterValue>();
+    public DbSet<UserIndicatorSubscription> UserIndicatorSubscriptions => Set<UserIndicatorSubscription>();
     public DbSet<UserStrategy> UserStrategies => Set<UserStrategy>();
     public DbSet<UserStrategyCoin> UserStrategyCoins => Set<UserStrategyCoin>();
     public DbSet<TradeSignal> TradeSignals => Set<TradeSignal>();
@@ -28,6 +29,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BalanceSnapshot> BalanceSnapshots => Set<BalanceSnapshot>();
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<ApiRequestLog> ApiRequestLogs => Set<ApiRequestLog>();
+    public DbSet<SystemConfig> SystemConfigs => Set<SystemConfig>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

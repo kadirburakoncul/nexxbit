@@ -36,7 +36,9 @@ export interface SignalRecord {
   coinDisplayName: string
   status: string   // 'Open' | 'Closed'
   entryPrice: number
+  entryQuantity: number
   entryValueUsdt: number
+  closeValueUsdt: number | null
   openedAt: string
   closePrice: number | null
   closedAt: string | null
@@ -44,6 +46,9 @@ export interface SignalRecord {
   realizedPnlPct: number | null
   isVirtual: boolean
   closeReason: string | null
+  strategyId: string | null
+  strategyName: string | null
+  strategyIsActive: boolean | null
 }
 
 export interface SignalStats {
@@ -87,7 +92,9 @@ export const signalRecordsApi = {
         coinDisplayName: p.coinSymbol,
         status: p.status,
         entryPrice: p.entryPrice,
+        entryQuantity: p.entryQuantity ?? 0,
         entryValueUsdt: p.entryValueUsdt ?? 0,
+        closeValueUsdt: p.closeValueUsdt ?? null,
         openedAt: p.openedAt,
         closePrice: p.closePrice,
         closedAt: p.closedAt,
@@ -95,6 +102,9 @@ export const signalRecordsApi = {
         realizedPnlPct: p.realizedPnlPct,
         isVirtual: p.isVirtual ?? false,
         closeReason: p.closeReason ?? null,
+        strategyId: p.strategyId ?? null,
+        strategyName: p.strategyName ?? null,
+        strategyIsActive: p.strategyIsActive ?? null,
       } satisfies SignalRecord))),
 
   stats: () =>
@@ -105,6 +115,18 @@ export const signalRecordsApi = {
 
   bulkDelete: (ids: string[]) =>
     api.delete('/position/bulk', { data: { ids } }),
+
+  manualSell: (id: string, body: { type: 'market' | 'limit'; limitPrice?: number; force?: boolean }) =>
+    api.post<{
+      success?: boolean
+      fillPrice?: number
+      realizedPnl?: number
+      realizedPnlPct?: number
+      belowTarget?: boolean
+      currentPrice?: number
+      limitPrice?: number
+      diff?: number
+    }>(`/position/${id}/manual-sell`, body).then(r => r.data),
 }
 
 export interface T3ChartCandle {
@@ -137,4 +159,24 @@ export const signalsApi = {
 
   list: (params?: { pageSize?: number }) =>
     signalRecordsApi.list(params),
+}
+
+export interface TimeframeSignal {
+  timeframe: string
+  direction: string
+  score: number
+  price: number
+  candleTime: string
+}
+
+export interface MultiTimeframeSignal {
+  coinId: number
+  coinSymbol: string
+  timeframes: TimeframeSignal[]
+  confluence: 'STRONG_BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG_SELL'
+}
+
+export const multiTimeframeApi = {
+  get: (hours = 24) =>
+    api.get<MultiTimeframeSignal[]>('/signal/multi-timeframe', { params: { hours } }).then(r => r.data),
 }

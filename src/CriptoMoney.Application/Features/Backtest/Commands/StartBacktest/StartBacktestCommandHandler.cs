@@ -4,6 +4,7 @@ using CriptoMoney.Application.Common.Models;
 using CriptoMoney.Domain.Entities;
 using CriptoMoney.Domain.Enums;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 namespace CriptoMoney.Application.Features.Backtest.Commands.StartBacktest;
 
@@ -33,6 +34,7 @@ public class StartBacktestCommandHandler(
             EndDate = request.EndDate,
             InitialCapital = request.InitialCapital,
             CommissionRate = request.CommissionRate,
+            SlippagePct = request.SlippagePct,
             StopLossPct = request.StopLossPct,
             TakeProfitPct = request.TakeProfitPct,
             StrategyConfig = request.StrategyConfig,
@@ -41,6 +43,24 @@ public class StartBacktestCommandHandler(
 
         db.BacktestRuns.Add(run);
         await db.SaveChangesAsync(cancellationToken);
+
+        // Otomatik temizleme: 30 günden eski backtestleri sil
+        var cutoff = DateTime.UtcNow.AddDays(-30);
+        var expired = await db.BacktestRuns
+            .Where(r => r.UserId == request.UserId && r.CreatedAt < cutoff)
+            .ToListAsync(cancellationToken);
+        if (expired.Count > 0) db.BacktestRuns.RemoveRange(expired);
+
+        // Max 10 backtest limiti: fazlaları en eskiden sil
+        var overflow = await db.BacktestRuns
+            .Where(r => r.UserId == request.UserId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Skip(10)
+            .ToListAsync(cancellationToken);
+        if (overflow.Count > 0) db.BacktestRuns.RemoveRange(overflow);
+
+        if (expired.Count > 0 || overflow.Count > 0)
+            await db.SaveChangesAsync(cancellationToken);
 
         // Hangfire job kuyruğuna ekle — scoped servis güvenliği için BacktestJob içinde çalışır
         jobScheduler.Enqueue(run.Id);

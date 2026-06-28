@@ -11,5 +11,6 @@ public record PositionStatsDto(
     int Closed,
     int Wins,
     int Losses,
-    decimal TotalPnlUsdt
+    decimal TotalPnlUsdt,
+    decimal TotalPnlPct
 );

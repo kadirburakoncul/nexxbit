@@ -31,7 +31,12 @@ public class GetPositionStatsQueryHandler(IApplicationDbContext db)
             .Where(p => p.Status == PositionStatus.Closed && p.RealizedPnl.HasValue)
             .Sum(p => p.RealizedPnl!.Value);
 
+        // Sanal pozisyonlar sadece RealizedPnlPct içerir; her işlemi eşit ağırlıkta sayarak topla
+        var totalPnlPct = positions
+            .Where(p => p.Status == PositionStatus.Closed && p.RealizedPnlPct.HasValue)
+            .Sum(p => p.RealizedPnlPct!.Value);
+
         return Result<PositionStatsDto>.Success(new PositionStatsDto(
-            total, open, closed, wins, losses, Math.Round(totalPnl, 2)));
+            total, open, closed, wins, losses, Math.Round(totalPnl, 2), Math.Round(totalPnlPct, 2)));
     }
 }

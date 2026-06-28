@@ -30,6 +30,9 @@ public class UpdateRiskSettingsCommandHandler(IApplicationDbContext db)
         r.FlashCrashProtectionEnabled = request.FlashCrashProtectionEnabled;
         r.FlashCrashDropPct = request.FlashCrashDropPct;
         r.FlashCrashWindowMinutes = request.FlashCrashWindowMinutes;
+        r.TelegramEnabled = request.TelegramEnabled;
+        r.TelegramBotToken = request.TelegramBotToken;
+        r.TelegramChatId = request.TelegramChatId;
 
         db.UserRiskSettings.Update(r);
         await db.SaveChangesAsync(cancellationToken);

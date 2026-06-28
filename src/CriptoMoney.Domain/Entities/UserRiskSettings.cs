@@ -29,5 +29,10 @@ public class UserRiskSettings : BaseEntity
     public bool AutoTradePaused { get; set; } = false;
     public DateTime? AutoTradePausedAt { get; set; }
 
+    // Telegram bildirimleri
+    public string? TelegramBotToken { get; set; }
+    public string? TelegramChatId { get; set; }
+    public bool TelegramEnabled { get; set; } = false;
+
     public User User { get; set; } = null!;
 }

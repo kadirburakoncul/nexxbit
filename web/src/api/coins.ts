@@ -7,6 +7,15 @@ export interface Candle {
 export interface BinancePair {
   symbol: string; baseAsset: string; quoteAsset: string; isTrading: boolean
 }
+export interface MomentumCoin {
+  symbol: string
+  baseAsset: string
+  priceChangePercent: number
+  lastPrice: number
+  quoteVolume: number
+  highPrice: number
+  lowPrice: number
+}
 
 export const coinsApi = {
   list: () => api.get<Coin[]>('/coin').then(r => r.data),
@@ -22,4 +31,6 @@ export const coinsApi = {
     api.post<Coin>('/coin/add', { symbol, baseAsset, quoteAsset }).then(r => r.data),
   deleteCoin: (coinId: number) =>
     api.delete(`/coin/${coinId}`).then(r => r.data),
+  getMomentumCoins: (minChange = 3, limit = 25) =>
+    api.get<MomentumCoin[]>('/coin/momentum', { params: { minChange, limit } }).then(r => r.data),
 }

@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CriptoMoney.Application.Features.Auth.Commands.ResetPassword;
 
-public class ResetPasswordCommandHandler(IApplicationDbContext db)
+public class ResetPasswordCommandHandler(IApplicationDbContext db, IPasswordHasher passwordHasher)
     : IRequestHandler<ResetPasswordCommand, Result>
 {
     public async Task<Result> Handle(ResetPasswordCommand request, CancellationToken cancellationToken)
@@ -19,7 +19,7 @@ public class ResetPasswordCommandHandler(IApplicationDbContext db)
         if (user.PasswordResetTokenExpiry.HasValue && user.PasswordResetTokenExpiry < DateTime.UtcNow)
             return Result.Failure("Sıfırlama bağlantısının süresi dolmuş. Lütfen yeniden talep edin.");
 
-        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         user.PasswordResetToken = null;
         user.PasswordResetTokenExpiry = null;
         user.RefreshToken = null;

@@ -2,6 +2,7 @@ using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Features.Strategy.Commands.UpsertStrategy;
 using CriptoMoney.Application.Features.Strategy.Queries.GetStrategies;
 using CriptoMoney.Application.Features.Strategy.Queries.GetStrategyMonitor;
+using CriptoMoney.Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -49,14 +50,17 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
     }
 
     [HttpPatch("{id:guid}/toggle")]
-    public async Task<IActionResult> ToggleStrategy(Guid id, CancellationToken ct)
+    public async Task<IActionResult> ToggleStrategy(
+        Guid id,
+        [FromQuery] string? action = null,    // "close" | "manual" | null
+        CancellationToken ct = default)
     {
         var strategy = await db.UserStrategies
             .FirstOrDefaultAsync(s => s.Id == id && s.UserId == CurrentUserId, ct);
 
         if (strategy is null) return NotFound();
 
-        // Aktifleştirme ise indikatör aktif mi kontrol et
+        // Aktifleştirme: indikatör pasifse engelle
         if (!strategy.IsActive && strategy.IndicatorId.HasValue)
         {
             var indicatorSetting = await db.UserIndicatorSettings
@@ -80,12 +84,72 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
             }
         }
 
+        // Deaktifleştirme onay kontrolü (action belirtilmemişse)
+        if (strategy.IsActive && action is null)
+        {
+            var signalCount = await db.TradeSignals
+                .CountAsync(s => s.StrategyId == id && !s.IsActedUpon, ct);
+
+            var realPositionCount = await db.Positions
+                .CountAsync(p => p.StrategyId == id && p.Status == PositionStatus.Open && !p.IsVirtual, ct);
+
+            var virtualPositionCount = await db.Positions
+                .CountAsync(p => p.StrategyId == id && p.Status == PositionStatus.Open && p.IsVirtual, ct);
+
+            if (signalCount > 0 || realPositionCount > 0 || virtualPositionCount > 0)
+            {
+                return Ok(new
+                {
+                    requiresConfirmation = true,
+                    isActive = true,
+                    signalCount,
+                    realPositionCount,
+                    virtualPositionCount,
+                });
+            }
+        }
+
+        // Hem close hem manual: önce sinyalleri ve sanal pozisyonları temizle
+        if (strategy.IsActive && action is "close" or "manual")
+        {
+            var signals = await db.TradeSignals
+                .Where(s => s.StrategyId == id && !s.IsActedUpon)
+                .ToListAsync(ct);
+            db.TradeSignals.RemoveRange(signals);
+
+            var virtualPositions = await db.Positions
+                .Where(p => p.StrategyId == id && p.Status == PositionStatus.Open && p.IsVirtual)
+                .ToListAsync(ct);
+            foreach (var pos in virtualPositions)
+            {
+                pos.Status = PositionStatus.Closed;
+                pos.ClosedAt = DateTime.UtcNow;
+                pos.CloseReason = "Strateji deaktif edildi";
+                if (pos.EntryPrice > 0) { pos.ClosePrice = pos.EntryPrice; pos.RealizedPnl = 0; pos.RealizedPnlPct = 0; }
+            }
+
+            if (action == "close")
+            {
+                // Gerçek pozisyonları da DB'de kapat (market satış PositionController'dan yapılır)
+                var realPositions = await db.Positions
+                    .Where(p => p.StrategyId == id && p.Status == PositionStatus.Open && !p.IsVirtual)
+                    .ToListAsync(ct);
+                foreach (var pos in realPositions)
+                {
+                    pos.Status = PositionStatus.Closed;
+                    pos.ClosedAt = DateTime.UtcNow;
+                    pos.CloseReason = "Strateji deaktif edildi — market satış";
+                    if (pos.EntryPrice > 0) { pos.ClosePrice = pos.EntryPrice; pos.RealizedPnl = 0; pos.RealizedPnlPct = 0; }
+                }
+            }
+            // action=="manual": gerçek pozisyonlar açık kalır, StrategyId korunur (strateji pasif=orphaned)
+        }
+
         strategy.IsActive = !strategy.IsActive;
-        if (strategy.IsActive)
-            strategy.ActivatedAt = DateTime.UtcNow;
+        if (strategy.IsActive) strategy.ActivatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
-        return Ok(new { isActive = strategy.IsActive, activatedAt = strategy.ActivatedAt });
+        return Ok(new { isActive = strategy.IsActive, activatedAt = strategy.ActivatedAt, requiresConfirmation = false });
     }
 
     [HttpPatch("{id:guid}/toggle-real-trade")]
@@ -101,7 +165,6 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
         return Ok(new { isRealTradeEnabled = strategy.IsRealTradeEnabled });
     }
 
-    // Belirli bir coin'in ReEntryState'ini Normal'e sıfırla
     [HttpPatch("{id:guid}/coins/{coinId:int}/reset-reentry")]
     public async Task<IActionResult> ResetReEntry(Guid id, int coinId, CancellationToken ct)
     {
@@ -141,14 +204,25 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
     }
 
     private UpsertStrategyCommand BuildCommand(Guid? strategyId, UpsertStrategyRequest req) =>
-        new(CurrentUserId, strategyId, req.Name, req.IndicatorId, req.CoinIds, req.Timeframe, req.TrailingStopPct, req.StopLossPct);
+        new(CurrentUserId, strategyId, req.Name, req.IndicatorId, req.CoinIds,
+            req.Timeframe, req.TrailingStopPct, req.StopLossPct, req.IsVolatileMode,
+            req.TakeProfitPct, req.MinVolumeUsdt, req.VolatilePositionSizePct,
+            req.VolatileMinChangePct, req.VolatileGainerLimit, req.IsRsiFilterEnabled);
 }
 
-public record UpsertStrategyRequest(
-    string Name,
-    int? IndicatorId,
-    List<int> CoinIds,
-    string Timeframe,
-    decimal TrailingStopPct,
-    decimal StopLossPct
-);
+public class UpsertStrategyRequest
+{
+    public string Name { get; set; } = "";
+    public int? IndicatorId { get; set; }
+    public List<int> CoinIds { get; set; } = [];
+    public string Timeframe { get; set; } = "1h";
+    public decimal TrailingStopPct { get; set; }
+    public decimal StopLossPct { get; set; }
+    public decimal? TakeProfitPct { get; set; }
+    public decimal? MinVolumeUsdt { get; set; }
+    public decimal? VolatilePositionSizePct { get; set; }
+    public bool IsVolatileMode { get; set; } = false;
+    public decimal VolatileMinChangePct { get; set; } = 3.0m;
+    public int VolatileGainerLimit { get; set; } = 20;
+    public bool IsRsiFilterEnabled { get; set; } = false;
+}

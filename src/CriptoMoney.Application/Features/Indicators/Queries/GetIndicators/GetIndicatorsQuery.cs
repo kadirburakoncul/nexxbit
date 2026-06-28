@@ -10,10 +10,14 @@ public record IndicatorSettingDto(
     string Name,
     string DisplayName,
     string Description,
+    string? HowItWorks,
     string Category,
     bool IsEnabled,
     decimal Weight,
-    List<ParameterValueDto> Parameters
+    List<ParameterValueDto> Parameters,
+    bool HasSubscription,
+    bool SubscriptionIsActive,
+    DateTime? SubscriptionExpiresAt
 );
 
 public record ParameterValueDto(

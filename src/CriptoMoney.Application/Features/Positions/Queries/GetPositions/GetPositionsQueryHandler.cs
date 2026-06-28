@@ -27,27 +27,44 @@ public class GetPositionsQueryHandler(IApplicationDbContext db)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-        var dtos = positions.Select(p => new PositionDto(
-            p.Id,
-            p.CoinId,
-            p.Coin.Symbol,
-            p.EntryPrice,
-            p.EntryQuantity,
-            p.EntryValueUsdt,
-            p.StopLossPrice,
-            p.TakeProfitPrice,
-            p.Status.ToString(),
-            p.ClosePrice,
-            p.CloseValueUsdt,
-            p.RealizedPnl,
-            p.RealizedPnlPct,
-            null,
-            p.IsVirtual,
-            p.OpenedAt,
-            p.ClosedAt,
-            p.CloseReason
-        )).ToList();
+        var strategyIds = positions
+            .Where(p => p.StrategyId.HasValue)
+            .Select(p => p.StrategyId!.Value)
+            .Distinct()
+            .ToList();
+
+        var strategyInfoList = strategyIds.Count > 0
+            ? await db.UserStrategies
+                .Where(s => strategyIds.Contains(s.Id))
+                .Select(s => new StrategyRef(s.Id, s.Name, s.IsActive))
+                .ToListAsync(cancellationToken)
+            : new List<StrategyRef>();
+
+        var strategyInfo = strategyInfoList.ToDictionary(s => s.Id);
+
+        var dtos = positions.Select(p =>
+        {
+            string? stratName = null;
+            bool? stratActive = null;
+            if (p.StrategyId.HasValue && strategyInfo.TryGetValue(p.StrategyId.Value, out var si))
+            {
+                stratName = si.Name;
+                stratActive = si.IsActive;
+            }
+            return new PositionDto(
+                p.Id, p.CoinId, p.Coin.Symbol,
+                p.EntryPrice, p.EntryQuantity, p.EntryValueUsdt,
+                p.StopLossPrice, p.TakeProfitPrice,
+                p.Status.ToString(),
+                p.ClosePrice, p.CloseValueUsdt,
+                p.RealizedPnl, p.RealizedPnlPct, null,
+                p.IsVirtual, p.OpenedAt, p.ClosedAt, p.CloseReason,
+                p.StrategyId, stratName, stratActive
+            );
+        }).ToList();
 
         return Result<List<PositionDto>>.Success(dtos);
     }
+
+    private record StrategyRef(Guid Id, string Name, bool IsActive);
 }

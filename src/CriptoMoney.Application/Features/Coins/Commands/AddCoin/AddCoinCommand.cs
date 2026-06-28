@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CriptoMoney.Application.Features.Coins.Commands.AddCoin;
 
-public record AddCoinCommand(string Symbol, string BaseAsset, string QuoteAsset)
+public record AddCoinCommand(string Symbol, string BaseAsset, string QuoteAsset, Guid UserId)
     : IRequest<Result<CoinDto>>;
 
 public class AddCoinCommandHandler(IApplicationDbContext db)
@@ -18,27 +18,33 @@ public class AddCoinCommandHandler(IApplicationDbContext db)
     {
         var symbol = request.Symbol.ToUpper().Trim();
 
-        var existing = await db.Coins
+        var coin = await db.Coins
             .FirstOrDefaultAsync(c => c.Symbol == symbol, cancellationToken);
 
-        if (existing is not null)
-            return Result<CoinDto>.Success(new CoinDto(
-                existing.Id, existing.Symbol, existing.BaseAsset,
-                existing.QuoteAsset, existing.DisplayName, false));
-
-        var coin = new Coin
+        if (coin is null)
         {
-            Symbol      = symbol,
-            BaseAsset   = request.BaseAsset.ToUpper(),
-            QuoteAsset  = request.QuoteAsset.ToUpper(),
-            DisplayName = $"{request.BaseAsset.ToUpper()}/USDT",
-            IsActive    = true,
-        };
+            coin = new Coin
+            {
+                Symbol      = symbol,
+                BaseAsset   = request.BaseAsset.ToUpper(),
+                QuoteAsset  = request.QuoteAsset.ToUpper(),
+                DisplayName = $"{request.BaseAsset.ToUpper()}/USDT",
+                IsActive    = true,
+            };
+            db.Coins.Add(coin);
+            await db.SaveChangesAsync(cancellationToken);
+        }
 
-        db.Coins.Add(coin);
-        await db.SaveChangesAsync(cancellationToken);
+        // Kullanıcının listesine ekle (yoksa)
+        var inList = await db.UserWatchlists
+            .AnyAsync(w => w.UserId == request.UserId && w.CoinId == coin.Id, cancellationToken);
+        if (!inList)
+        {
+            db.UserWatchlists.Add(new UserWatchlist { UserId = request.UserId, CoinId = coin.Id });
+            await db.SaveChangesAsync(cancellationToken);
+        }
 
         return Result<CoinDto>.Success(new CoinDto(
-            coin.Id, coin.Symbol, coin.BaseAsset, coin.QuoteAsset, coin.DisplayName, false));
+            coin.Id, coin.Symbol, coin.BaseAsset, coin.QuoteAsset, coin.DisplayName, true));
     }
 }

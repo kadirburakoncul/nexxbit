@@ -14,6 +14,7 @@ public interface IApplicationDbContext
     DbSet<IndicatorParameterDefinition> IndicatorParameterDefinitions { get; }
     DbSet<UserIndicatorSetting> UserIndicatorSettings { get; }
     DbSet<UserIndicatorParameterValue> UserIndicatorParameterValues { get; }
+    DbSet<UserIndicatorSubscription> UserIndicatorSubscriptions { get; }
     DbSet<UserStrategy> UserStrategies { get; }
     DbSet<UserStrategyCoin> UserStrategyCoins { get; }
     DbSet<TradeSignal> TradeSignals { get; }
@@ -26,6 +27,7 @@ public interface IApplicationDbContext
     DbSet<BalanceSnapshot> BalanceSnapshots { get; }
     DbSet<SystemLog> SystemLogs { get; }
     DbSet<ApiRequestLog> ApiRequestLogs { get; }
+    DbSet<SystemConfig> SystemConfigs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

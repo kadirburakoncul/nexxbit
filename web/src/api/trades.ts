@@ -2,13 +2,22 @@ import { api } from './client'
 
 export interface TradeOrder {
   id: string
+  coinId: number
   coinSymbol: string
   side: number
-  quantity: number
-  price: number
+  type: string
   status: number
+  quantity: number
+  price: number | null
+  filledQuantity: number | null
+  filledPrice: number | null
+  commission: number | null
+  commissionAsset: string | null
+  isAutomatic: boolean
+  binanceOrderId: number | null
   realizedPnl: number | null
   createdAt: string
+  updatedAt: string
 }
 
 export interface ManualOrderRequest {

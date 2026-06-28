@@ -200,7 +200,8 @@ function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
   const { data: klines, isFetching } = useQuery({
     queryKey: ['binance-klines', coin.coinSymbol, timeframe],
     queryFn: () => fetchBinanceKlines(coin.coinSymbol, timeframe, 200),
-    refetchInterval: 60_000,
+    enabled: expanded,
+    refetchInterval: expanded ? 60_000 : false,
     staleTime: 30_000,
   })
 
@@ -325,7 +326,7 @@ function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
         />
 
         {/* Details row */}
-        <div className="grid grid-cols-4 gap-3 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           {/* Son AL fiyatı */}
           <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-lg p-2.5">
             <p className="text-slate-600 mb-1 uppercase text-[10px] tracking-wider">Son AL</p>
@@ -534,7 +535,7 @@ export default function MonitorPage() {
   return (
     <>
       <Header title="Strateji Takip" />
-      <div className="p-6 space-y-5 max-w-[1400px]">
+      <div className="p-3 md:p-6 space-y-4 md:space-y-5 max-w-[1400px]">
         {/* Top bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

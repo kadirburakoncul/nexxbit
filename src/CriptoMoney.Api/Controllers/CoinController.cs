@@ -55,14 +55,14 @@ public class CoinController(IMediator mediator, IBinanceService binanceService) 
     [HttpPost("add")]
     public async Task<IActionResult> AddCoin([FromBody] AddCoinRequest req, CancellationToken ct)
     {
-        var result = await mediator.Send(new AddCoinCommand(req.Symbol, req.BaseAsset, req.QuoteAsset), ct);
+        var result = await mediator.Send(new AddCoinCommand(req.Symbol, req.BaseAsset, req.QuoteAsset, CurrentUserId), ct);
         return result.Succeeded ? Ok(result.Data) : BadRequest(result);
     }
 
     [HttpDelete("{coinId:int}")]
     public async Task<IActionResult> DeleteCoin(int coinId, CancellationToken ct)
     {
-        var result = await mediator.Send(new DeleteCoinCommand(coinId), ct);
+        var result = await mediator.Send(new DeleteCoinCommand(coinId, CurrentUserId), ct);
         return result.Succeeded ? NoContent() : BadRequest(result);
     }
 
@@ -72,6 +72,17 @@ public class CoinController(IMediator mediator, IBinanceService binanceService) 
         var result = await mediator.Send(new ToggleWatchlistCommand(CurrentUserId, coinId), ct);
         if (!result.Succeeded) return BadRequest(result);
         return Ok(new { added = result.Data, message = result.Data ? "İzleme listesine eklendi." : "İzleme listesinden kaldırıldı." });
+    }
+
+    // 24s en fazla yükselen coinler — momentum tarayıcısı
+    [HttpGet("momentum")]
+    public async Task<IActionResult> GetMomentumCoins(
+        [FromQuery] decimal minChange = 3,
+        [FromQuery] int limit = 25,
+        CancellationToken ct = default)
+    {
+        var result = await binanceService.GetTopGainersAsync(minChange, limit, ct);
+        return Ok(result);
     }
 }
 

@@ -4,13 +4,10 @@ using Microsoft.Extensions.Logging;
 
 namespace CriptoMoney.BackgroundJobs.Jobs;
 
-/// <summary>
-/// Hangfire tarafından çalıştırılan backtest job'u.
-/// StartBacktestCommandHandler tarafından enqueue edilir.
-/// </summary>
 public class BacktestJob(
     IApplicationDbContext db,
     IBacktestEngine backtestEngine,
+    IBacktestProgressNotifier notifier,
     ILogger<BacktestJob> logger)
 {
     public async Task ExecuteAsync(Guid runId, CancellationToken ct = default)
@@ -23,7 +20,16 @@ public class BacktestJob(
         }
 
         logger.LogInformation("Backtest başlıyor: {RunId} {Name}", runId, run.Name);
-        await backtestEngine.RunAsync(run, ct);
+
+        await backtestEngine.RunAsync(run, ct, async pct =>
+        {
+            try { await notifier.NotifyProgressAsync(runId, pct, ct); }
+            catch { /* SignalR hatası backtest'i durdurmasın */ }
+        });
+
+        try { await notifier.NotifyDoneAsync(runId, run.Status.ToString(), ct); }
+        catch { }
+
         logger.LogInformation("Backtest bitti: {RunId} Status={Status}", runId, run.Status);
     }
 }

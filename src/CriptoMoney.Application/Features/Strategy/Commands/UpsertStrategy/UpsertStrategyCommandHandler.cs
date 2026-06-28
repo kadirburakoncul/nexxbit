@@ -12,21 +12,18 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
 {
     public async Task<Result<Guid>> Handle(UpsertStrategyCommand request, CancellationToken ct)
     {
-        // Coin çakışma kontrolü: bir coin başka aktif stratejide kullanılamaz
-        foreach (var coinId in request.CoinIds)
-        {
-            var conflict = await db.UserStrategyCoins
-                .AnyAsync(sc => sc.Coin.Id == coinId
-                    && sc.UserStrategy.UserId == request.UserId
-                    && sc.UserStrategy.IsActive
-                    && sc.UserStrategyId != request.StrategyId, ct);
+        // Volatil modda coin listesi boş olabilir — strateji momentum tarayıcısını kullanır
+        if (!request.IsVolatileMode && request.CoinIds.Count == 0)
+            return Result<Guid>.Failure("En az 1 coin seçin.");
 
-            if (conflict)
-            {
-                var coin = await db.Coins.FindAsync([coinId], ct);
-                return Result<Guid>.Failure($"{coin?.Symbol ?? coinId.ToString()} başka aktif bir stratejide zaten kullanılıyor.");
-            }
-        }
+        // Aynı isimde başka strateji var mı?
+        var duplicateName = await db.UserStrategies.AnyAsync(s =>
+            s.UserId == request.UserId &&
+            s.Name == request.Name &&
+            s.Id != (request.StrategyId ?? Guid.Empty), ct);
+
+        if (duplicateName)
+            return Result<Guid>.Failure("Bu isimde bir strateji zaten mevcut.");
 
         UserStrategy strategy;
 
@@ -44,6 +41,23 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
             existing.Timeframe = request.Timeframe;
             existing.TrailingStopPct = request.TrailingStopPct;
             existing.StopLossPct = request.StopLossPct;
+            existing.IsVolatileMode = request.IsVolatileMode;
+            existing.TakeProfitPct = request.TakeProfitPct;
+            existing.MinVolumeUsdt = request.MinVolumeUsdt;
+            existing.VolatilePositionSizePct = request.VolatilePositionSizePct;
+            existing.VolatileMinChangePct = request.VolatileMinChangePct;
+            existing.VolatileGainerLimit = request.VolatileGainerLimit;
+            existing.IsRsiFilterEnabled = request.IsRsiFilterEnabled;
+            existing.MomentumFreshFilterMinutes = request.MomentumFreshFilterMinutes;
+            existing.UseAtrBasedStops = request.UseAtrBasedStops;
+            existing.AtrPeriod = request.AtrPeriod;
+            existing.AtrSlMultiplier = request.AtrSlMultiplier;
+            existing.AtrTpMultiplier = request.AtrTpMultiplier;
+            existing.PartialTpPct = request.PartialTpPct;
+            existing.PartialTpClosePct = request.PartialTpClosePct;
+            existing.IsVolumeSurgeFilterEnabled = request.IsVolumeSurgeFilterEnabled;
+            existing.VolumeSurgeMultiplier = request.VolumeSurgeMultiplier;
+            existing.UseMarketRegimeFilter = request.UseMarketRegimeFilter;
 
             // Coin listesini güncelle — yeniden gelmeyenleri kaldır, yenileri ekle
             var existingCoinIds = existing.StrategyCoins.Select(sc => sc.CoinId).ToHashSet();
@@ -67,6 +81,23 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
                 Timeframe = request.Timeframe,
                 TrailingStopPct = request.TrailingStopPct,
                 StopLossPct = request.StopLossPct,
+                IsVolatileMode = request.IsVolatileMode,
+                TakeProfitPct = request.TakeProfitPct,
+                MinVolumeUsdt = request.MinVolumeUsdt,
+                VolatilePositionSizePct = request.VolatilePositionSizePct,
+                VolatileMinChangePct = request.VolatileMinChangePct,
+                VolatileGainerLimit = request.VolatileGainerLimit,
+                IsRsiFilterEnabled = request.IsRsiFilterEnabled,
+                MomentumFreshFilterMinutes = request.MomentumFreshFilterMinutes,
+                UseAtrBasedStops = request.UseAtrBasedStops,
+                AtrPeriod = request.AtrPeriod,
+                AtrSlMultiplier = request.AtrSlMultiplier,
+                AtrTpMultiplier = request.AtrTpMultiplier,
+                PartialTpPct = request.PartialTpPct,
+                PartialTpClosePct = request.PartialTpClosePct,
+                IsVolumeSurgeFilterEnabled = request.IsVolumeSurgeFilterEnabled,
+                VolumeSurgeMultiplier = request.VolumeSurgeMultiplier,
+                UseMarketRegimeFilter = request.UseMarketRegimeFilter,
                 IsActive = true,
             };
             db.UserStrategies.Add(strategy);

@@ -1,5 +1,6 @@
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Features.Signals.Commands.ApproveSignal;
+using CriptoMoney.Application.Features.Signals.Queries.GetMultiTimeframeSignals;
 using CriptoMoney.Application.Features.Signals.Queries.GetSignals;
 using CriptoMoney.Domain.Enums;
 using MediatR;
@@ -115,6 +116,18 @@ public class SignalController(IMediator mediator, ISignalEngine signalEngine, IA
     {
         var result = await mediator.Send(
             new GetSignalsQuery(CurrentUserId, coinId, direction, pageNumber, pageSize), ct);
+        return result.Succeeded ? Ok(result.Data) : BadRequest(result);
+    }
+
+    /// <summary>
+    /// Multi-timeframe confluence görünümü: son N saatteki sinyaller coin bazında gruplanır.
+    /// </summary>
+    [HttpGet("multi-timeframe")]
+    public async Task<IActionResult> GetMultiTimeframe(
+        [FromQuery] int hours = 24,
+        CancellationToken ct = default)
+    {
+        var result = await mediator.Send(new GetMultiTimeframeSignalsQuery(CurrentUserId, hours), ct);
         return result.Succeeded ? Ok(result.Data) : BadRequest(result);
     }
 

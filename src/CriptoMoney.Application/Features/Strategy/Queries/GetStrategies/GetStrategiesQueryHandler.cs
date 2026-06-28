@@ -18,7 +18,6 @@ public class GetStrategiesQueryHandler(IApplicationDbContext db)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
 
-        // Aktif indikatör display adlarını toplu çek
         var indicatorIds = strategies
             .Where(s => s.IndicatorId.HasValue)
             .Select(s => s.IndicatorId!.Value)
@@ -39,8 +38,25 @@ public class GetStrategiesQueryHandler(IApplicationDbContext db)
             s.Timeframe,
             s.TrailingStopPct,
             s.StopLossPct,
+            s.TakeProfitPct,
+            s.MinVolumeUsdt,
+            s.VolatilePositionSizePct,
+            s.VolatileMinChangePct,
+            s.VolatileGainerLimit,
+            s.IsRsiFilterEnabled,
+            s.MomentumFreshFilterMinutes,
+            s.UseAtrBasedStops,
+            s.AtrPeriod,
+            s.AtrSlMultiplier,
+            s.AtrTpMultiplier,
+            s.PartialTpPct,
+            s.PartialTpClosePct,
+            s.IsVolumeSurgeFilterEnabled,
+            s.VolumeSurgeMultiplier,
+            s.UseMarketRegimeFilter,
             s.IsActive,
             s.IsRealTradeEnabled,
+            s.IsVolatileMode,
             s.ActivatedAt,
             s.StrategyCoins.Select(sc => new StrategyCoinDto(
                 sc.CoinId,

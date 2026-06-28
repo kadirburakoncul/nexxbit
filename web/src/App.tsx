@@ -18,6 +18,7 @@ import IndicatorPage from '@/pages/IndicatorPage'
 import StrategyPage from '@/pages/StrategyPage'
 import TradesPage from '@/pages/TradesPage'
 import MonitorPage from '@/pages/MonitorPage'
+import VolatilePage from '@/pages/VolatilePage'
 import ForgotPasswordPage from '@/pages/ForgotPasswordPage'
 import ResetPasswordPage from '@/pages/ResetPasswordPage'
 import VerifyEmailPage from '@/pages/VerifyEmailPage'
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/indicators" element={<IndicatorPage />} />
             <Route path="/strategies" element={<StrategyPage />} />
             <Route path="/monitor" element={<MonitorPage />} />
+            <Route path="/volatile" element={<VolatilePage />} />
             <Route path="/admin/*" element={<AdminPage />} />
             <Route path="/chart" element={<ChartPage />} />
             <Route path="/admin/logs" element={<AdminLogsPage />} />

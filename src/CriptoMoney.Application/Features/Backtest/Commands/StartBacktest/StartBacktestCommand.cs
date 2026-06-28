@@ -12,6 +12,7 @@ public record StartBacktestCommand(
     DateTime EndDate,
     decimal InitialCapital,
     decimal CommissionRate,
+    decimal SlippagePct,
     decimal? StopLossPct,
     decimal? TakeProfitPct,
     string StrategyConfig   // BacktestConfig JSON

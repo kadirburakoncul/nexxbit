@@ -24,7 +24,7 @@ export interface BacktestResult extends BacktestRun {
 export interface StartBacktestRequest {
   name: string; coinIds: number[]; timeframe: string
   startDate: string; endDate: string; initialCapital: number
-  commissionRate: number; stopLossPct: number | null; takeProfitPct: number | null
+  commissionRate: number; slippagePct: number; stopLossPct: number | null; takeProfitPct: number | null
 }
 
 export const backtestApi = {

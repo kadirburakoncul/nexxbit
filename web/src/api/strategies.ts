@@ -15,8 +15,25 @@ export interface Strategy {
   timeframe: string
   trailingStopPct: number
   stopLossPct: number
+  takeProfitPct: number | null
+  minVolumeUsdt: number | null
+  volatilePositionSizePct: number | null
+  volatileMinChangePct: number
+  volatileGainerLimit: number
+  isRsiFilterEnabled: boolean
+  momentumFreshFilterMinutes: number
+  useAtrBasedStops: boolean
+  atrPeriod: number
+  atrSlMultiplier: number
+  atrTpMultiplier: number
+  partialTpPct: number | null
+  partialTpClosePct: number
+  isVolumeSurgeFilterEnabled: boolean
+  volumeSurgeMultiplier: number
+  useMarketRegimeFilter: boolean
   isActive: boolean
   isRealTradeEnabled: boolean
+  isVolatileMode: boolean
   activatedAt: string | null
   coins: StrategyCoin[]
 }
@@ -28,6 +45,23 @@ export interface UpsertStrategyRequest {
   timeframe: string
   trailingStopPct: number
   stopLossPct: number
+  takeProfitPct: number | null
+  minVolumeUsdt: number | null
+  volatilePositionSizePct: number | null
+  volatileMinChangePct: number
+  volatileGainerLimit: number
+  isVolatileMode: boolean
+  isRsiFilterEnabled: boolean
+  momentumFreshFilterMinutes: number
+  useAtrBasedStops: boolean
+  atrPeriod: number
+  atrSlMultiplier: number
+  atrTpMultiplier: number
+  partialTpPct: number | null
+  partialTpClosePct: number
+  isVolumeSurgeFilterEnabled: boolean
+  volumeSurgeMultiplier: number
+  useMarketRegimeFilter: boolean
 }
 
 export interface CoinMonitor {
@@ -67,8 +101,15 @@ export const strategiesApi = {
     api.post<{ strategyId: string }>('/strategy', req).then(r => r.data),
   update: (id: string, req: UpsertStrategyRequest) =>
     api.put(`/strategy/${id}`, req),
-  toggle: (id: string) =>
-    api.patch<{ isActive: boolean; activatedAt: string | null }>(`/strategy/${id}/toggle`).then(r => r.data),
+  toggle: (id: string, action?: string) =>
+    api.patch<{
+      isActive: boolean
+      activatedAt: string | null
+      requiresConfirmation?: boolean
+      signalCount?: number
+      realPositionCount?: number
+      virtualPositionCount?: number
+    }>(`/strategy/${id}/toggle`, null, { params: action ? { action } : {} }).then(r => r.data),
   toggleRealTrade: (id: string) =>
     api.patch<{ isRealTradeEnabled: boolean }>(`/strategy/${id}/toggle-real-trade`).then(r => r.data),
   delete: (id: string) =>

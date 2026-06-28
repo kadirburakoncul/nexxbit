@@ -30,5 +30,8 @@ public record PositionDto(
     bool IsVirtual,
     DateTime OpenedAt,
     DateTime? ClosedAt,
-    string? CloseReason
+    string? CloseReason,
+    Guid? StrategyId,
+    string? StrategyName,
+    bool? StrategyIsActive
 );
