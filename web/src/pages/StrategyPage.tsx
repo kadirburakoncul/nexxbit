@@ -601,7 +601,7 @@ function StrategyForm({
     watch,
     setValue,
     formState: { errors },
-  } = useForm<FormData>({ resolver: zodResolver(schema) as any, defaultValues: initialValues })
+  } = useForm<FormData>({ resolver: zodResolver(schema) as any, defaultValues: initialValues, mode: 'onBlur' })
 
   const selectedCoinIds = watch('coinIds')
   const isVolatileMode = watch('isVolatileMode')

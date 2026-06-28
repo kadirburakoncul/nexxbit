@@ -32,26 +32,39 @@ export default function BottomNav() {
 
   return (
     <>
-      {/* More drawer */}
-      {open && (
-        <div className="md:hidden fixed inset-0 z-50" onClick={() => setOpen(false)}>
-          <div className="absolute bottom-14 left-0 right-0 bg-[#0f1117]/98 border-t border-white/8 grid grid-cols-4 gap-0">
-            {moreItems.map(({ to, icon: Icon, label }) => (
-              <NavLink
-                key={to}
-                to={to}
-                onClick={() => setOpen(false)}
-                className={({ isActive }) =>
-                  cn('flex flex-col items-center justify-center gap-1 py-4 text-[10px] font-medium transition-colors',
-                    isActive ? 'text-yellow-400' : 'text-slate-400')}
-              >
-                <Icon size={20} strokeWidth={1.5} />
-                <span>{label}</span>
-              </NavLink>
-            ))}
-          </div>
+      {/* More drawer — slide-up animasyonu */}
+      <div
+        className={cn(
+          'md:hidden fixed inset-0 z-50 transition-all duration-200',
+          open ? 'pointer-events-auto' : 'pointer-events-none'
+        )}
+        onClick={() => setOpen(false)}
+      >
+        {/* Backdrop */}
+        <div className={cn(
+          'absolute inset-0 bg-black/40 transition-opacity duration-200',
+          open ? 'opacity-100' : 'opacity-0'
+        )} />
+        {/* Drawer */}
+        <div className={cn(
+          'absolute bottom-14 left-0 right-0 bg-[#0f1117] border-t border-white/8 grid grid-cols-4 gap-0 transition-transform duration-200',
+          open ? 'translate-y-0' : 'translate-y-full'
+        )}>
+          {moreItems.map(({ to, icon: Icon, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                cn('flex flex-col items-center justify-center gap-1 py-4 text-[10px] font-medium transition-colors',
+                  isActive ? 'text-yellow-400' : 'text-slate-400')}
+            >
+              <Icon size={20} strokeWidth={1.5} />
+              <span>{label}</span>
+            </NavLink>
+          ))}
         </div>
-      )}
+      </div>
 
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0f1117]/95 backdrop-blur border-t border-white/8 flex items-stretch h-14">
         {primaryItems.map(({ to, icon: Icon, label }) => (

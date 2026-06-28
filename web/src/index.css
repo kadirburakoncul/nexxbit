@@ -41,3 +41,36 @@ select option:hover {
 ::-webkit-scrollbar-track { background: #12131a; }
 ::-webkit-scrollbar-thumb { background: #2d2f3e; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #3d3f52; }
+
+/* ── Light mode ─────────────────────────────────────────────────────────── */
+html.light-mode {
+  color-scheme: light;
+}
+html.light-mode body {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+html.light-mode select {
+  background-color: #f8fafc;
+  color: #0f172a;
+  color-scheme: light;
+}
+html.light-mode select option {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+html.light-mode ::-webkit-scrollbar-track { background: #e2e8f0; }
+html.light-mode ::-webkit-scrollbar-thumb { background: #94a3b8; }
+/* Invert the dark glass panels to light equivalents */
+html.light-mode .bg-\[#0b0b0f\],
+html.light-mode .bg-\[#0f1117\] { background-color: #f8fafc !important; }
+html.light-mode .bg-white\/\[0\.03\],
+html.light-mode .bg-white\/\[0\.02\] { background-color: rgba(0,0,0,0.03) !important; }
+html.light-mode .text-slate-200 { color: #1e293b !important; }
+html.light-mode .text-slate-300 { color: #334155 !important; }
+html.light-mode .text-slate-400 { color: #475569 !important; }
+html.light-mode .text-slate-500 { color: #64748b !important; }
+html.light-mode .text-slate-600 { color: #94a3b8 !important; }
+html.light-mode .border-white\/8,
+html.light-mode .border-white\/\[0\.08\] { border-color: rgba(0,0,0,0.08) !important; }
+html.light-mode .border-white\/10 { border-color: rgba(0,0,0,0.10) !important; }

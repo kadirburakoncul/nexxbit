@@ -1,9 +1,12 @@
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { signalRecordsApi } from '@/api/signals'
 import type { SignalRecord } from '@/api/signals'
 import { formatUsdt, pnlColor } from '@/lib/utils'
 import Header from '@/components/layout/Header'
+import { usePushNotification } from '@/hooks/usePushNotification'
+import { exportCsv } from '@/lib/exportCsv'
+import { Download } from 'lucide-react'
 import {
   TrendingUp, TrendingDown, Wallet, BarChart2,
   Clock, CheckCircle2, Activity,
@@ -44,15 +47,34 @@ function fmtTR(str: string | null | undefined): string {
   })
 }
 
-function duration(from: string, to?: string | null): string {
+function calcDuration(from: string, to?: string | null): string {
   const ms = (to ? new Date(to.endsWith('Z') ? to : to + 'Z') : new Date()).getTime()
            - new Date(from.endsWith('Z') ? from : from + 'Z').getTime()
   if (ms < 0) return '—'
   const h = Math.floor(ms / 3_600_000)
   const m = Math.floor((ms % 3_600_000) / 60_000)
+  const s = Math.floor((ms % 60_000) / 1_000)
   if (h >= 24) return `${Math.floor(h / 24)}g ${h % 24}s`
   if (h > 0)   return `${h}s ${m}d`
-  return `${m}d`
+  if (m > 0)   return `${m}d ${s}s`
+  return `${s}s`
+}
+
+// Canlı sayaç — açık pozisyonlar için her saniye güncellenir
+function useLiveDuration(openedAt: string, isOpen: boolean): string {
+  const [, setTick] = useState(0)
+  const ref = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    if (!isOpen) return
+    ref.current = setInterval(() => setTick(t => t + 1), 1000)
+    return () => { if (ref.current) clearInterval(ref.current) }
+  }, [isOpen])
+  return calcDuration(openedAt)
+}
+
+function OpenPositionDuration({ openedAt }: { openedAt: string }) {
+  const dur = useLiveDuration(openedAt, true)
+  return <span>{dur}</span>
 }
 
 function fmtPrice(n: number): string {
@@ -297,12 +319,12 @@ function OpenPositionCard({ p }: { p: SignalRecord }) {
                 {isOrphaned ? 'STRATEJİ KAPALI' : 'AÇIK'}
               </span>
             </div>
-            <span className="text-xs text-slate-500">{fmtTR(p.openedAt)} · {duration(p.openedAt)}</span>
+            <span className="text-xs text-slate-500">{fmtTR(p.openedAt)} · <OpenPositionDuration openedAt={p.openedAt} /></span>
           </div>
         </div>
         <div className="text-right">
           <p className="text-xs text-slate-600">Süre</p>
-          <p className="text-sm font-semibold text-slate-300">{duration(p.openedAt)}</p>
+          <p className="text-sm font-semibold text-slate-300"><OpenPositionDuration openedAt={p.openedAt} /></p>
         </div>
       </div>
 
@@ -396,6 +418,8 @@ type Tab = 'open' | 'closed' | 'all'
 
 export default function PositionsPage() {
   const [tab, setTab] = useState<Tab>('open')
+  const { notify, permission, requestPermission } = usePushNotification()
+  const prevClosedIds = useRef<Set<string>>(new Set())
 
   const { data: positions, isLoading } = useQuery({
     queryKey: ['positions', 'real'],
@@ -405,6 +429,21 @@ export default function PositionsPage() {
 
   const open   = useMemo(() => positions?.filter(p => p.status === 'Open') ?? [], [positions])
   const closed = useMemo(() => positions?.filter(p => p.status !== 'Open') ?? [], [positions])
+
+  // Push notification: yeni kapanan pozisyon tespit et
+  useEffect(() => {
+    if (!positions) return
+    const newlyClosed = closed.filter(p => !prevClosedIds.current.has(p.id))
+    newlyClosed.forEach(p => {
+      const pnl = p.realizedPnlPct
+      const sign = pnl != null && pnl >= 0 ? '+' : ''
+      notify(
+        `${p.coinSymbol} Pozisyonu Kapandı`,
+        `${p.closeReason ?? 'Kapandı'} · P&L: ${sign}${pnl?.toFixed(2) ?? '?'}%`
+      )
+    })
+    prevClosedIds.current = new Set(closed.map(p => p.id))
+  }, [closed, notify])
   const shown  = tab === 'open' ? open : tab === 'closed' ? closed : (positions ?? [])
 
   // Özet istatistikler
@@ -423,6 +462,36 @@ export default function PositionsPage() {
     <>
       <Header title="Pozisyonlar" />
       <div className="p-3 md:p-6 space-y-5">
+
+        {/* Araçlar */}
+        <div className="flex items-center gap-2 justify-end -mb-2">
+          {permission !== 'granted' && (
+            <button
+              onClick={requestPermission}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-400/10 border border-yellow-400/20 rounded-lg text-xs text-yellow-400 hover:bg-yellow-400/20 transition-colors"
+            >
+              🔔 Kapanış bildirimleri
+            </button>
+          )}
+          <button
+            onClick={() => exportCsv('pozisyonlar', (positions ?? []).map(p => ({
+              Coin: p.coinSymbol,
+              Strateji: p.strategyName ?? '',
+              Durum: p.status,
+              Giriş: p.entryPrice,
+              Çıkış: p.closePrice ?? '',
+              'P&L%': p.realizedPnlPct ?? '',
+              'P&L USDT': p.realizedPnl ?? '',
+              Sebep: p.closeReason ?? '',
+              AçılışTarihi: p.openedAt,
+              KapanışTarihi: p.closedAt ?? '',
+            })))}
+            disabled={!positions?.length}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-white/10 disabled:opacity-40 transition-colors"
+          >
+            <Download size={12} /> CSV
+          </button>
+        </div>
 
         {/* ── Özet Kartları ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -538,6 +607,7 @@ export default function PositionsPage() {
 // ─── Kapalı pozisyonlar tablosu ──────────────────────────────────────────────
 function ClosedPositionsTable({ rows }: { rows: SignalRecord[] }) {
   const totalPnl = rows.reduce((s, r) => s + (r.realizedPnl ?? 0), 0)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   return (
     <div className="bg-white/[0.03] border border-white/8 rounded-xl overflow-hidden">
@@ -580,7 +650,11 @@ function ClosedPositionsTable({ rows }: { rows: SignalRecord[] }) {
               const netPct = rowComm != null ? pnlPct - rowComm.pct : null
               const netIsWin = (netPct ?? 0) > 0
               return (
-                <tr key={p.id} className="hover:bg-white/[0.04] transition-colors group">
+                <React.Fragment key={p.id}>
+                <tr
+                  className="hover:bg-white/[0.04] transition-colors group cursor-pointer"
+                  onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                >
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-2.5">
                       <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
@@ -590,6 +664,7 @@ function ClosedPositionsTable({ rows }: { rows: SignalRecord[] }) {
                       </div>
                       <div>
                         <p className="text-xs font-bold text-slate-200">{p.coinSymbol}</p>
+                        {p.strategyName && <p className="text-[10px] text-yellow-400/60">{p.strategyName}</p>}
                         <p className="text-[10px] text-slate-600">{fmtTR(p.openedAt)}</p>
                       </div>
                     </div>
@@ -649,10 +724,49 @@ function ClosedPositionsTable({ rows }: { rows: SignalRecord[] }) {
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1 text-xs text-slate-500">
                       <Clock size={10} />
-                      {duration(p.openedAt, p.closedAt)}
+                      {calcDuration(p.openedAt, p.closedAt)}
                     </div>
                   </td>
                 </tr>
+                {expandedId === p.id && (
+                  <tr className="bg-white/[0.02]">
+                    <td colSpan={8} className="px-6 py-3 border-b border-white/5">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                        <div>
+                          <p className="text-slate-600 mb-0.5">Pozisyon ID</p>
+                          <p className="text-slate-400 font-mono text-[10px] break-all">{p.id}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600 mb-0.5">Açılış</p>
+                          <p className="text-slate-300 font-mono">{new Date(p.openedAt).toLocaleString('tr-TR')}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600 mb-0.5">Kapanış</p>
+                          <p className="text-slate-300 font-mono">{p.closedAt ? new Date(p.closedAt).toLocaleString('tr-TR') : '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600 mb-0.5">Tahmini Komisyon</p>
+                          <p className="text-slate-300 font-mono">{rowComm != null ? `~$${rowComm.total.toFixed(3)}` : '—'}</p>
+                        </div>
+                        {p.closePrice != null && (
+                          <div>
+                            <p className="text-slate-600 mb-0.5">Çıkış Değeri</p>
+                            <p className="text-slate-300 font-mono">{formatUsdt(p.closeValueUsdt ?? 0)}</p>
+                          </div>
+                        )}
+                        {netPct != null && (
+                          <div>
+                            <p className="text-slate-600 mb-0.5">Net P&L (kom. sonrası)</p>
+                            <p className={cn('font-mono font-bold', netIsWin ? 'text-emerald-400' : 'text-red-400')}>
+                              {netPct > 0 ? '+' : ''}{netPct.toFixed(3)}%
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               )
             })}
           </tbody>

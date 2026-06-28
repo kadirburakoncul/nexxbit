@@ -473,7 +473,7 @@ export default function DashboardPage() {
     }, [JSON.stringify(watchlistCoins)]),
   })
 
-  const open = positions?.filter(p => p.status === 'Open') ?? []
+  const open = positions?.filter(p => p.status === 'Open' && !p.isVirtual) ?? []
   const closed = positions?.filter(p => p.status !== 'Open') ?? []
   const recentClosed = closed.slice(0, 10)
 
@@ -489,6 +489,36 @@ export default function DashboardPage() {
   const totalPnlWins = closedWithPnlPct.filter(p => (p.realizedPnlPct ?? 0) > 0).length
   const totalPnlLosses = closedWithPnlPct.filter(p => (p.realizedPnlPct ?? 0) < 0).length
   const winRate = closedWithPnlPct.length > 0 ? (totalPnlWins / closedWithPnlPct.length) * 100 : 0
+
+  // Anlık açık pozisyon P&L: bulk fiyat çek
+  const openSymbols = open.map(p => p.coinSymbol)
+  const { data: livePrices } = useQuery({
+    queryKey: ['bulk-prices-dashboard', openSymbols],
+    queryFn: async () => {
+      if (!openSymbols.length) return {} as Record<string, number>
+      const results = await Promise.all(
+        openSymbols.map(sym =>
+          fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`)
+            .then(r => r.json()).then(j => [sym, parseFloat(j.price)] as [string, number])
+            .catch(() => [sym, 0] as [string, number])
+        )
+      )
+      return Object.fromEntries(results)
+    },
+    enabled: openSymbols.length > 0,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  })
+
+  const unrealizedPnlUsdt = open.reduce((sum, p) => {
+    const livePrice = livePrices?.[p.coinSymbol] ?? 0
+    if (!livePrice || !p.entryQuantity) return sum
+    const nowValue = livePrice * p.entryQuantity
+    return sum + (nowValue - p.entryValueUsdt)
+  }, 0)
+  const unrealizedPnlPct = open.length > 0 && open.reduce((s, p) => s + p.entryValueUsdt, 0) > 0
+    ? (unrealizedPnlUsdt / open.reduce((s, p) => s + p.entryValueUsdt, 0)) * 100
+    : 0
 
   // Active strategies + monitored coins
   const activeStrategies = monitor?.length ?? 0
@@ -598,6 +628,22 @@ export default function DashboardPage() {
             color={open.length > 0 ? 'text-yellow-400' : 'text-slate-500'}
             accent={open.length > 0 ? 'border-yellow-400/15' : 'border-white/5'}
           />
+
+          {/* Anlık Unrealized P&L */}
+          {open.length > 0 && (
+            <MetricCard
+              label="Anlık P&L"
+              value={livePrices
+                ? `${unrealizedPnlUsdt >= 0 ? '+' : ''}${unrealizedPnlUsdt.toFixed(2)} $`
+                : '…'}
+              sub={livePrices
+                ? `${unrealizedPnlPct >= 0 ? '+' : ''}${unrealizedPnlPct.toFixed(2)}% · ${open.length} pos`
+                : 'Fiyat alınıyor'}
+              icon={unrealizedPnlUsdt >= 0 ? TrendingUp : TrendingDown}
+              color={!livePrices ? 'text-slate-500' : unrealizedPnlUsdt >= 0 ? 'text-emerald-400' : 'text-red-400'}
+              accent={!livePrices ? 'border-white/5' : unrealizedPnlUsdt >= 0 ? 'border-emerald-500/10' : 'border-red-500/10'}
+            />
+          )}
 
           {/* Strateji Takip */}
           <Link to="/monitor" className="block">

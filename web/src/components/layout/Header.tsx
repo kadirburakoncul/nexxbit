@@ -1,13 +1,15 @@
-import { Bell, LogOut, User } from 'lucide-react'
+import { Bell, LogOut, User, Sun, Moon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { authApi } from '@/api/auth'
 import { useQuery } from '@tanstack/react-query'
 import { notificationsApi } from '@/api/notifications'
+import { useThemeStore } from '@/stores/themeStore'
 
 export default function Header({ title }: { title?: string }) {
   const { user, logout, refreshToken } = useAuthStore()
   const navigate = useNavigate()
+  const { theme, toggle: toggleTheme } = useThemeStore()
 
   const { data: notifs } = useQuery({
     queryKey: ['notifications', 'unread'],
@@ -35,6 +37,15 @@ export default function Header({ title }: { title?: string }) {
           {(notifs?.unreadCount ?? 0) > 0 && (
             <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-yellow-400" />
           )}
+        </button>
+
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
+          title={theme === 'dark' ? 'Açık tema' : 'Koyu tema'}
+        >
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
 
         {/* User — name hidden on mobile */}

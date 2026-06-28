@@ -94,6 +94,7 @@ export default function BacktestPage() {
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
     defaultValues: { name: '', strategyId: '', startDate: '', endDate: '', initialCapital: 1000, commissionRate: 0.001, slippagePct: 0.05 },
+    mode: 'onBlur',
   })
 
   const selectedStrategyId = watch('strategyId')

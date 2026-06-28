@@ -1,5 +1,5 @@
-import { HubConnection, HubConnectionBuilder, LogLevel } from '@microsoft/signalr'
-import { useEffect, useRef, useCallback } from 'react'
+import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 
 type EventHandler = (...args: unknown[]) => void
@@ -14,6 +14,7 @@ interface UseSignalROptions {
 export function useSignalR({ hubUrl, events, onConnected, enabled = true }: UseSignalROptions) {
   const connRef = useRef<HubConnection | null>(null)
   const accessToken = useAuthStore(s => s.accessToken)
+  const [state, setState] = useState<HubConnectionState>(HubConnectionState.Disconnected)
 
   const stop = useCallback(async () => {
     if (connRef.current) {
@@ -27,7 +28,7 @@ export function useSignalR({ hubUrl, events, onConnected, enabled = true }: UseS
 
     const conn = new HubConnectionBuilder()
       .withUrl(hubUrl, { accessTokenFactory: () => accessToken })
-      .withAutomaticReconnect()
+      .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .configureLogging(LogLevel.Warning)
       .build()
 
@@ -35,9 +36,19 @@ export function useSignalR({ hubUrl, events, onConnected, enabled = true }: UseS
       conn.on(event, handler)
     })
 
+    conn.onreconnecting(() => setState(HubConnectionState.Reconnecting))
+    conn.onreconnected(() => setState(HubConnectionState.Connected))
+    conn.onclose(() => setState(HubConnectionState.Disconnected))
+
     conn.start()
-      .then(() => onConnected?.(conn))
-      .catch(err => console.warn(`SignalR [${hubUrl}] bağlantı hatası:`, err))
+      .then(() => {
+        setState(HubConnectionState.Connected)
+        return onConnected?.(conn)
+      })
+      .catch(err => {
+        setState(HubConnectionState.Disconnected)
+        console.warn(`SignalR [${hubUrl}] bağlantı hatası:`, err)
+      })
 
     connRef.current = conn
 
@@ -45,5 +56,5 @@ export function useSignalR({ hubUrl, events, onConnected, enabled = true }: UseS
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hubUrl, enabled, accessToken])
 
-  return { stop, connRef }
+  return { stop, connRef, state }
 }

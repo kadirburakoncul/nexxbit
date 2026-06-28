@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { toast } from 'sonner'
 
 const baseURL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
@@ -33,6 +34,14 @@ api.interceptors.response.use(
         localStorage.removeItem('refreshToken')
         window.location.href = '/login'
       }
+    }
+    // API'den gelen mesajı göster (401 hariç — o login yönlendirmesi yapıyor)
+    if (err.response?.status !== 401) {
+      const msg = err.response?.data?.message
+        ?? err.response?.data?.errors?.[0]
+        ?? err.message
+        ?? 'Bir hata oluştu'
+      toast.error(msg, { duration: 4000 })
     }
     return Promise.reject(err)
   }

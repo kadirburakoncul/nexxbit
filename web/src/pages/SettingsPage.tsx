@@ -1,3 +1,4 @@
+import React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -7,9 +8,11 @@ import { client } from '@/api/client'
 import { coinsApi } from '@/api/coins'
 import { binanceApi } from '@/api/binance'
 import { useState, useEffect } from 'react'
-import { ShieldX, ShieldCheck, X, Wifi, WifiOff, Bot, Gauge, Zap, Search, Check, ChevronDown, ChevronUp, Send, AlertTriangle, KeyRound } from 'lucide-react'
+import { ShieldX, ShieldCheck, X, Wifi, WifiOff, Bot, Gauge, Zap, Search, Check, ChevronDown, ChevronUp, Send, AlertTriangle, KeyRound, Sun, Moon, Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Link } from 'react-router-dom'
+import { useThemeStore } from '@/stores/themeStore'
+import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/stores/timezoneStore'
 
 interface RiskSettings {
   tradeMode: number
@@ -52,6 +55,8 @@ const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.
 
 export default function SettingsPage() {
   const qc = useQueryClient()
+  const { theme, toggle: toggleTheme } = useThemeStore()
+  const { timezone, setTimezone } = useTimezoneStore()
   const [saved, setSaved] = useState(false)
   const [coinListSaved, setCoinListSaved] = useState(false)
   const [coinListOpen, setCoinListOpen] = useState(false)
@@ -398,6 +403,53 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Görünüm + Saat Dilimi */}
+        <div className="bg-white/[0.02] border border-white/8 rounded-xl p-5 space-y-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-slate-400">
+              <Sun size={14} />
+            </div>
+            <p className="text-sm font-semibold text-slate-200">Görünüm & Saat Dilimi</p>
+          </div>
+
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-sm text-slate-300">Tema</p>
+              <p className="text-xs text-slate-600">Arayüz renk şeması</p>
+            </div>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-colors',
+                theme === 'dark'
+                  ? 'bg-slate-800/60 border-white/10 text-slate-200 hover:border-white/20'
+                  : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+              )}
+            >
+              {theme === 'dark' ? <Moon size={14} /> : <Sun size={14} />}
+              {theme === 'dark' ? 'Koyu' : 'Açık'}
+            </button>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Globe size={13} className="text-slate-500" />
+              <label className="text-sm text-slate-300">Saat Dilimi</label>
+            </div>
+            <select
+              value={timezone}
+              onChange={e => setTimezone(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-yellow-400/50"
+            >
+              {TIMEZONE_OPTIONS.map(tz => (
+                <option key={tz.value} value={tz.value}>{tz.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-600">Tarih/saat gösterimleri bu dilime göre formatlanır.</p>
+          </div>
         </div>
 
       </div>
