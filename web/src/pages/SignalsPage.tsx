@@ -3,7 +3,7 @@ import { signalRecordsApi, multiTimeframeApi } from '@/api/signals'
 import type { SignalRecord } from '@/api/signals'
 import Header from '@/components/layout/Header'
 import { TrendingUp, TrendingDown, RefreshCw, Activity, Clock, Trash2, DollarSign, X, AlertTriangle, Layers } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatUsdt } from '@/lib/utils'
 import { useState, useEffect } from 'react'
 
 const CONFLUENCE_META = {
@@ -104,10 +104,14 @@ export default function SignalsPage() {
   const open = records?.filter(r => r.status === 'Open') ?? []
   const closed = records?.filter(r => r.status === 'Closed') ?? []
 
-  const closedWins = closed.filter(r => r.realizedPnlPct != null && r.realizedPnlPct > 0).length
-  const closedLosses = closed.filter(r => r.realizedPnlPct != null && r.realizedPnlPct < 0).length
-  const closedWithPnl = closed.filter(r => r.realizedPnlPct != null)
-  const totalPnlPct = closedWithPnl.reduce((sum, r) => sum + (r.realizedPnlPct ?? 0), 0)
+  const closedWins = closed.filter(r => (r.realizedPnl ?? 0) > 0).length
+  const closedLosses = closed.filter(r => (r.realizedPnl ?? 0) < 0).length
+  const closedWithPnl = closed.filter(r => r.realizedPnl != null && r.entryValueUsdt > 0)
+
+  // Toplam K/Z: sum(realizedPnl USDT) / sum(yatırılan USDT) — yüzde toplamı değil
+  const totalRealizedUsdt = closedWithPnl.reduce((s, r) => s + (r.realizedPnl ?? 0), 0)
+  const totalInvestedUsdt = closedWithPnl.reduce((s, r) => s + r.entryValueUsdt, 0)
+  const totalPnlPct = totalInvestedUsdt > 0 ? (totalRealizedUsdt / totalInvestedUsdt) * 100 : 0
   const hasPnl = closedWithPnl.length > 0
 
   return (
@@ -191,7 +195,9 @@ export default function SignalsPage() {
             value={hasPnl ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : '—'}
             valueClass={!hasPnl ? undefined : totalPnlPct > 0 ? 'text-emerald-400' : totalPnlPct < 0 ? 'text-red-400' : 'text-slate-400'}
             icon={hasPnl ? (totalPnlPct >= 0 ? <TrendingUp size={16} className="text-emerald-400" /> : <TrendingDown size={16} className="text-red-400" />) : undefined}
-            sub={hasPnl ? `${closedWithPnl.length} işlem · ${closedWins} K / ${closedLosses} Z` : 'Henüz kapanan yok'}
+            sub={hasPnl
+              ? `${totalRealizedUsdt >= 0 ? '+' : ''}${formatUsdt(totalRealizedUsdt)} · ${closedWins} K / ${closedLosses} Z`
+              : 'Henüz kapanan yok'}
           />
           <StatCard
             label="Toplam"
