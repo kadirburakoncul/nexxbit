@@ -18,7 +18,8 @@ public class SignalEngine(
     private const int CandleFetchLimit = 500;
 
     public async Task<TradeSignal?> GenerateSignalAsync(
-        Guid userId, int coinId, string symbol, string timeframe, CancellationToken ct = default)
+        Guid userId, int coinId, string symbol, string timeframe,
+        CancellationToken ct = default, Guid? strategyId = null)
     {
         // 0. Whitelist/Blacklist kontrolü — engellenen coin için sinyal üretme
         if (!await IsCoinAllowedAsync(userId, coinId, ct))
@@ -28,11 +29,15 @@ public class SignalEngine(
         }
 
         // 1. Kullanıcının bu coin+timeframe için stratejisini bul
-        var strategy = await db.UserStrategies
-            .FirstOrDefaultAsync(s => s.UserId == userId
-                && (s.CoinId == coinId || s.CoinId == null)
-                && s.Timeframe == timeframe
-                && s.IsActive, ct);
+        //    strategyId verilmişse doğrudan o stratejiyi kullan (volatile mod için gerekli)
+        var strategy = strategyId.HasValue
+            ? await db.UserStrategies
+                .FirstOrDefaultAsync(s => s.Id == strategyId.Value && s.UserId == userId && s.IsActive, ct)
+            : await db.UserStrategies
+                .FirstOrDefaultAsync(s => s.UserId == userId
+                    && (s.CoinId == coinId || s.CoinId == null)
+                    && s.Timeframe == timeframe
+                    && s.IsActive, ct);
 
         if (strategy is null)
         {

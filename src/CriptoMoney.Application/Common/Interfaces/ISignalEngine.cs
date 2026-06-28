@@ -45,7 +45,8 @@ public interface ISignalEngine
         int coinId,
         string symbol,
         string timeframe,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        Guid? strategyId = null);
 
     Task<SignalAnalysisResult> AnalyzeAsync(
         Guid userId,

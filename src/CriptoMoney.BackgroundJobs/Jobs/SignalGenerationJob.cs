@@ -142,7 +142,7 @@ public class SignalGenerationJob(
                 if (ct.IsCancellationRequested) break;
                 try
                 {
-                    await ProcessSignalAsync(userId, coin.Id, coin.Symbol, timeframe, ct);
+                    await ProcessSignalAsync(userId, coin.Id, coin.Symbol, timeframe, ct, strategy.Id);
                 }
                 catch (Exception ex)
                 {
@@ -214,9 +214,10 @@ public class SignalGenerationJob(
     };
 
     private async Task ProcessSignalAsync(
-        Guid userId, int coinId, string symbol, string timeframe, CancellationToken ct)
+        Guid userId, int coinId, string symbol, string timeframe, CancellationToken ct,
+        Guid? strategyId = null)
     {
-        var signal = await signalEngine.GenerateSignalAsync(userId, coinId, symbol, timeframe, ct);
+        var signal = await signalEngine.GenerateSignalAsync(userId, coinId, symbol, timeframe, ct, strategyId);
 
         if (signal is null)
         {
