@@ -9,6 +9,7 @@ import { notificationsApi } from '@/api/notifications'
 import { coinsApi } from '@/api/coins'
 import type { MomentumCoin } from '@/api/coins'
 import { formatUsdt, cn } from '@/lib/utils'
+import { hubUrl } from '@/api/client'
 import {
   TrendingUp, TrendingDown, Wifi, WifiOff, Activity, RefreshCw,
   AlertCircle, ArrowUpRight, ArrowDownRight, Bell, Radar,
@@ -456,7 +457,7 @@ export default function DashboardPage() {
   // Candle WebSocket — strateji coinlerine subscribe ol, her kapanan mumda sinyal/pozisyon invalidate et
   const watchlistCoins = monitor?.flatMap(st => st.coins.map(c => ({ symbol: c.coinSymbol, interval: st.timeframe }))) ?? []
   useSignalR({
-    hubUrl: '/hubs/candle',
+    hubUrl: hubUrl('/hubs/candle'),
     enabled: watchlistCoins.length > 0,
     events: {
       CandleUpdate: useCallback(() => {

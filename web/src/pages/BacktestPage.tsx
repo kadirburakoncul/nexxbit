@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import Header from '@/components/layout/Header'
 import { useSignalR } from '@/hooks/useSignalR'
+import { hubUrl } from '@/api/client'
 
 const STATUS_META: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
   Pending:   { label: 'Kuyrukta', cls: 'bg-slate-500/20 text-slate-400 border border-slate-500/20', icon: <Clock size={10} /> },
@@ -66,7 +67,7 @@ export default function BacktestPage() {
   const connRef = useRef<import('@microsoft/signalr').HubConnection | null>(null)
 
   const { connRef: signalRRef } = useSignalR({
-    hubUrl: '/hubs/backtest',
+    hubUrl: hubUrl('/hubs/backtest'),
     enabled: true,
     events: {
       Progress: useCallback((...args: unknown[]) => {

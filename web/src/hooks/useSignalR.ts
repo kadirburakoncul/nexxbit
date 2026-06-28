@@ -14,7 +14,8 @@ interface UseSignalROptions {
 export function useSignalR({ hubUrl, events, onConnected, enabled = true }: UseSignalROptions) {
   const connRef = useRef<HubConnection | null>(null)
   const accessToken = useAuthStore(s => s.accessToken)
-  const [state, setState] = useState<HubConnectionState>(HubConnectionState.Disconnected)
+  const [state, setState] = useState<HubConnectionState>(HubConnectionState.Connecting)
+  const everConnected = useRef(false)
 
   const stop = useCallback(async () => {
     if (connRef.current) {
@@ -37,16 +38,18 @@ export function useSignalR({ hubUrl, events, onConnected, enabled = true }: UseS
     })
 
     conn.onreconnecting(() => setState(HubConnectionState.Reconnecting))
-    conn.onreconnected(() => setState(HubConnectionState.Connected))
-    conn.onclose(() => setState(HubConnectionState.Disconnected))
+    conn.onreconnected(() => { everConnected.current = true; setState(HubConnectionState.Connected) })
+    conn.onclose(() => setState(everConnected.current ? HubConnectionState.Disconnected : HubConnectionState.Connecting))
 
     conn.start()
       .then(() => {
+        everConnected.current = true
         setState(HubConnectionState.Connected)
         return onConnected?.(conn)
       })
       .catch(err => {
-        setState(HubConnectionState.Disconnected)
+        // İlk bağlantı başarısız — banner gösterme, sessizce logla
+        setState(HubConnectionState.Connecting)
         console.warn(`SignalR [${hubUrl}] bağlantı hatası:`, err)
       })
 

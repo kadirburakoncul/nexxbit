@@ -1,9 +1,14 @@
 import axios from 'axios'
 import { toast } from 'sonner'
 
-const baseURL = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL}/api`
-  : '/api'
+const apiOrigin = import.meta.env.VITE_API_URL ?? ''
+
+const baseURL = apiOrigin ? `${apiOrigin}/api` : '/api'
+
+/** SignalR hub URL'i — VITE_API_URL set ise tam URL, yoksa relative */
+export function hubUrl(path: string) {
+  return apiOrigin ? `${apiOrigin}${path}` : path
+}
 
 export const api = axios.create({ baseURL })
 export { api as client }

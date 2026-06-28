@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useIdleTimeout } from '@/hooks/useIdleTimeout'
 import { useSignalR } from '@/hooks/useSignalR'
 import { useQueryClient } from '@tanstack/react-query'
+import { hubUrl } from '@/api/client'
 
 export default function AppLayout() {
   const { accessToken } = useAuthStore()
@@ -16,7 +17,7 @@ export default function AppLayout() {
 
   // Global SignalR bağlantısı — tüm layout boyunca aktif
   const { state: signalRState } = useSignalR({
-    hubUrl: '/hubs/candle',
+    hubUrl: hubUrl('/hubs/candle'),
     events: {
       CandleUpdate: () => {
         qc.invalidateQueries({ queryKey: ['positions'] })

@@ -7,7 +7,8 @@ interface Props {
 }
 
 export default function ConnectionBanner({ state }: Props) {
-  if (state === HubConnectionState.Connected) return null
+  // Connecting = ilk bağlantı denenirken, banner gösterme
+  if (state === HubConnectionState.Connected || state === HubConnectionState.Connecting) return null
 
   const isReconnecting = state === HubConnectionState.Reconnecting
 
