@@ -266,6 +266,253 @@ namespace CriptoMoney.Persistence.Migrations
                     b.ToTable("BalanceSnapshots");
                 });
 
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistIndicatorSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("IsRsiFilterEnabled")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<decimal>("RsiBuyThreshold")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("RsiPeriod")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("T3Factor")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("T3Period")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("BistIndicatorSettings");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistSignal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<int>("BistStockId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("BistStrategyId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CandleTime")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(300)
+                        .HasColumnType("varchar(300)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BistStockId");
+
+                    b.HasIndex("CandleTime");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("BistStrategyId", "BistStockId", "CandleTime")
+                        .IsUnique();
+
+                    b.ToTable("BistSignals");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistStock", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("Sector")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<string>("Symbol")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Symbol")
+                        .IsUnique();
+
+                    b.ToTable("BistStocks");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistStrategy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime?>("ActivatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("IsRsiFilterEnabled")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<decimal>("RsiBuyThreshold")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<int>("RsiPeriod")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Timeframe")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("BistStrategies");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistStrategyStock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<int>("BistStockId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("BistStrategyId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("LastCheckedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("LastCheckedReason")
+                        .HasMaxLength(300)
+                        .HasColumnType("varchar(300)");
+
+                    b.Property<decimal?>("LastPrice")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<DateTime?>("LastPriceAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<decimal?>("LastT3")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<bool?>("LastT3UpDirection")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BistStockId");
+
+                    b.HasIndex("BistStrategyId", "BistStockId")
+                        .IsUnique();
+
+                    b.ToTable("BistStrategyStocks");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistWatchlistItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<int>("BistStockId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BistStockId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("BistWatchlistItems");
+                });
+
             modelBuilder.Entity("CriptoMoney.Domain.Entities.CandleData", b =>
                 {
                     b.Property<long>("Id")
@@ -594,6 +841,15 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<decimal?>("PartialTpHitPrice")
                         .HasColumnType("decimal(65,30)");
 
+                    b.Property<decimal?>("PeakPnlPct")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal?>("PeakPrice")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<DateTime?>("PeakPriceAt")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<decimal?>("RealizedPnl")
                         .HasPrecision(28, 8)
                         .HasColumnType("decimal(28,8)");
@@ -623,6 +879,15 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<decimal?>("TrailingStopPct")
                         .HasPrecision(5, 2)
                         .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal?>("TroughPnlPct")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal?>("TroughPrice")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<DateTime?>("TroughPriceAt")
+                        .HasColumnType("datetime(6)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
@@ -880,6 +1145,9 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasColumnType("varchar(100)");
 
                     b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("IsApprovedByAdmin")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<bool>("IsDeleted")
@@ -1193,6 +1461,12 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<DateTime?>("ActivatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<decimal>("AdxMinValue")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<int>("AdxPeriod")
+                        .HasColumnType("int");
+
                     b.Property<int>("AtrPeriod")
                         .HasColumnType("int");
 
@@ -1200,6 +1474,9 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasColumnType("decimal(65,30)");
 
                     b.Property<decimal>("AtrTpMultiplier")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal>("BreakevenTriggerPct")
                         .HasColumnType("decimal(65,30)");
 
                     b.Property<decimal>("BuyThreshold")
@@ -1232,6 +1509,9 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<bool>("IsEma200RuleEnabled")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<bool>("IsGreenCandleFilterEnabled")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<bool>("IsRealTradeEnabled")
                         .HasColumnType("tinyint(1)");
 
@@ -1243,6 +1523,21 @@ namespace CriptoMoney.Persistence.Migrations
 
                     b.Property<bool>("IsVolumeSurgeFilterEnabled")
                         .HasColumnType("tinyint(1)");
+
+                    b.Property<int>("MaxHoldHours")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MaxOpenPositions")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("MaxPositionSizePct")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal?>("MaxPositionSizeUsdt")
+                        .HasColumnType("decimal(65,30)");
+
+                    b.Property<decimal>("MinPositionSizeUsdt")
+                        .HasColumnType("decimal(65,30)");
 
                     b.Property<decimal?>("MinVolumeUsdt")
                         .HasPrecision(18, 2)
@@ -1266,6 +1561,9 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasPrecision(5, 2)
                         .HasColumnType("decimal(5,2)");
 
+                    b.Property<int>("SlCooldownHours")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("StopLossPct")
                         .HasColumnType("decimal(65,30)");
 
@@ -1288,7 +1586,16 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<bool>("UseAdxFilter")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<bool>("UseAtrBasedStops")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("UseBreakevenStop")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("UseMacdFilter")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<bool>("UseMarketRegimeFilter")
@@ -1421,6 +1728,93 @@ namespace CriptoMoney.Persistence.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistIndicatorSetting", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("CriptoMoney.Domain.Entities.BistIndicatorSetting", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistSignal", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.BistStock", "BistStock")
+                        .WithMany("Signals")
+                        .HasForeignKey("BistStockId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CriptoMoney.Domain.Entities.BistStrategy", "BistStrategy")
+                        .WithMany()
+                        .HasForeignKey("BistStrategyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CriptoMoney.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BistStock");
+
+                    b.Navigation("BistStrategy");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistStrategy", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistStrategyStock", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.BistStock", "BistStock")
+                        .WithMany("StrategyStocks")
+                        .HasForeignKey("BistStockId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CriptoMoney.Domain.Entities.BistStrategy", "BistStrategy")
+                        .WithMany("StrategyStocks")
+                        .HasForeignKey("BistStrategyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BistStock");
+
+                    b.Navigation("BistStrategy");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistWatchlistItem", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.BistStock", "BistStock")
+                        .WithMany("WatchlistItems")
+                        .HasForeignKey("BistStockId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CriptoMoney.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BistStock");
 
                     b.Navigation("User");
                 });
@@ -1688,6 +2082,20 @@ namespace CriptoMoney.Persistence.Migrations
             modelBuilder.Entity("CriptoMoney.Domain.Entities.BacktestRun", b =>
                 {
                     b.Navigation("Trades");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistStock", b =>
+                {
+                    b.Navigation("Signals");
+
+                    b.Navigation("StrategyStocks");
+
+                    b.Navigation("WatchlistItems");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.BistStrategy", b =>
+                {
+                    b.Navigation("StrategyStocks");
                 });
 
             modelBuilder.Entity("CriptoMoney.Domain.Entities.Coin", b =>

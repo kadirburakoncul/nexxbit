@@ -33,10 +33,21 @@ public class UpdateUserCredentialsCommandHandler(IApplicationDbContext db, IPass
 
         if (!string.IsNullOrWhiteSpace(request.NewPassword))
         {
-            if (request.NewPassword.Length < 6)
-                return Result.Failure("Şifre en az 6 karakter olmalıdır.");
+            if (request.NewPassword.Length < 8)
+                return Result.Failure("Şifre en az 8 karakter olmalıdır.");
+            if (request.NewPassword.Length > 128)
+                return Result.Failure("Şifre en fazla 128 karakter olabilir.");
+            if (!request.NewPassword.Any(char.IsUpper))
+                return Result.Failure("Şifre en az bir büyük harf içermelidir.");
+            if (!request.NewPassword.Any(char.IsLower))
+                return Result.Failure("Şifre en az bir küçük harf içermelidir.");
+            if (!request.NewPassword.Any(char.IsDigit))
+                return Result.Failure("Şifre en az bir rakam içermelidir.");
 
             user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+            // Şifre değiştiğinde mevcut refresh token'ı geçersiz kıl
+            user.RefreshToken = null;
+            user.RefreshTokenExpiry = null;
         }
 
         await db.SaveChangesAsync(ct);

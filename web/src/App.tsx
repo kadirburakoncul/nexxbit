@@ -25,6 +25,16 @@ import VolatilePage from '@/pages/VolatilePage'
 import ForgotPasswordPage from '@/pages/ForgotPasswordPage'
 import ResetPasswordPage from '@/pages/ResetPasswordPage'
 import VerifyEmailPage from '@/pages/VerifyEmailPage'
+import BistDashboardPage from '@/pages/BistDashboardPage'
+import BistIndicatorsPage from '@/pages/BistIndicatorsPage'
+import BistStrategyPage from '@/pages/BistStrategyPage'
+import BistSignalsPage from '@/pages/BistSignalsPage'
+import BistMonitorPage from '@/pages/BistMonitorPage'
+import BistChartPage from '@/pages/BistChartPage'
+import BistStocksPage from '@/pages/BistStocksPage'
+import MarketSelectPage from '@/pages/MarketSelectPage'
+import TradingAnalysisPage from '@/pages/TradingAnalysisPage'
+import AnalyticsPage from '@/pages/AnalyticsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -47,6 +57,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/market-select" element={<MarketSelectPage />} />
           <Route element={<AppLayout />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/coins" element={<CoinsPage />} />
@@ -60,10 +71,19 @@ export default function App() {
             <Route path="/strategies" element={<StrategyPage />} />
             <Route path="/monitor" element={<MonitorPage />} />
             <Route path="/volatile" element={<VolatilePage />} />
+            <Route path="/analysis" element={<TradingAnalysisPage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/admin/*" element={<AdminPage />} />
             <Route path="/chart" element={<ChartPage />} />
             <Route path="/admin/logs" element={<AdminLogsPage />} />
             <Route path="/backtest" element={<BacktestPage />} />
+            <Route path="/bist" element={<BistDashboardPage />} />
+            <Route path="/bist/indicators" element={<BistIndicatorsPage />} />
+            <Route path="/bist/strategies" element={<BistStrategyPage />} />
+            <Route path="/bist/signals" element={<BistSignalsPage />} />
+            <Route path="/bist/monitor" element={<BistMonitorPage />} />
+            <Route path="/bist/chart" element={<BistChartPage />} />
+            <Route path="/bist/stocks" element={<BistStocksPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

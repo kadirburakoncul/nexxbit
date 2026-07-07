@@ -33,5 +33,14 @@ public record PositionDto(
     string? CloseReason,
     Guid? StrategyId,
     string? StrategyName,
-    bool? StrategyIsActive
+    bool? StrategyIsActive,
+    decimal? PeakPrice,
+    decimal? PeakPnlPct,
+    DateTime? PeakPriceAt,
+    decimal? TroughPrice,
+    decimal? TroughPnlPct,
+    DateTime? TroughPriceAt,
+    decimal? TrailingStopPct,
+    bool IsPartialTpHit,
+    decimal? PartialRealizedPnlPct
 );

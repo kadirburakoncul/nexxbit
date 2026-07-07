@@ -1,10 +1,12 @@
 using CriptoMoney.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace CriptoMoney.Application.Common.Interfaces;
 
 public interface IApplicationDbContext
 {
+    DatabaseFacade Database { get; }
     DbSet<User> Users { get; }
     DbSet<UserBinanceAccount> UserBinanceAccounts { get; }
     DbSet<UserWatchlist> UserWatchlists { get; }
@@ -28,6 +30,12 @@ public interface IApplicationDbContext
     DbSet<SystemLog> SystemLogs { get; }
     DbSet<ApiRequestLog> ApiRequestLogs { get; }
     DbSet<SystemConfig> SystemConfigs { get; }
+    DbSet<BistStock> BistStocks { get; }
+    DbSet<BistSignal> BistSignals { get; }
+    DbSet<BistIndicatorSetting> BistIndicatorSettings { get; }
+    DbSet<BistStrategy> BistStrategies { get; }
+    DbSet<BistStrategyStock> BistStrategyStocks { get; }
+    DbSet<BistWatchlistItem> BistWatchlistItems { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

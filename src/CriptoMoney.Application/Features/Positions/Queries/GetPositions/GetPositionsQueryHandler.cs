@@ -59,7 +59,10 @@ public class GetPositionsQueryHandler(IApplicationDbContext db)
                 p.ClosePrice, p.CloseValueUsdt,
                 p.RealizedPnl, p.RealizedPnlPct, null,
                 p.IsVirtual, p.OpenedAt, p.ClosedAt, p.CloseReason,
-                p.StrategyId, stratName, stratActive
+                p.StrategyId, stratName, stratActive,
+                p.PeakPrice, p.PeakPnlPct, p.PeakPriceAt,
+                p.TroughPrice, p.TroughPnlPct, p.TroughPriceAt,
+                p.TrailingStopPct, p.IsPartialTpHit, p.PartialRealizedPnlPct
             );
         }).ToList();
 

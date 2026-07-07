@@ -4,6 +4,7 @@ import { strategiesApi, RE_ENTRY_LABEL } from '@/api/strategies'
 import type { Strategy, UpsertStrategyRequest } from '@/api/strategies'
 import { coinsApi } from '@/api/coins'
 import { indicatorsApi } from '@/api/indicators'
+import { useAuthStore } from '@/stores/authStore'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -24,7 +25,7 @@ const schema = z.object({
   minVolumeUsdt: z.coerce.number().min(1000).nullable().optional(),
   volatilePositionSizePct: z.coerce.number().min(1).max(200).nullable().optional(),
   volatileMinChangePct: z.coerce.number().min(0.5).max(50).default(3),
-  volatileGainerLimit: z.coerce.number().int().min(5).max(100).default(20),
+  volatileGainerLimit: z.coerce.number().int().min(5).max(100).default(40),
   momentumFreshFilterMinutes: z.coerce.number().int().min(0).max(60).default(5),
   isVolatileMode: z.boolean().default(false),
   isRsiFilterEnabled: z.boolean().default(false),
@@ -37,6 +38,20 @@ const schema = z.object({
   isVolumeSurgeFilterEnabled: z.boolean().default(false),
   volumeSurgeMultiplier: z.coerce.number().min(1).max(10).default(1.5),
   useMarketRegimeFilter: z.boolean().default(false),
+  maxHoldHours: z.coerce.number().int().min(1).max(72).default(8),
+  slCooldownHours: z.coerce.number().int().min(0).max(24).default(2),
+  isGreenCandleFilterEnabled: z.boolean().default(true),
+  isEma200RuleEnabled: z.boolean().default(true),
+  maxOpenPositions: z.coerce.number().int().min(1).max(20).default(5),
+  maxPositionSizeUsdt: z.coerce.number().min(1).nullable().optional(),
+  maxPositionSizePct: z.coerce.number().min(1).max(100).nullable().optional(),
+  minPositionSizeUsdt: z.coerce.number().min(5).max(10000).default(10),
+  useAdxFilter: z.boolean().default(false),
+  adxPeriod: z.coerce.number().int().min(5).max(50).default(14),
+  adxMinValue: z.coerce.number().min(10).max(60).default(25),
+  useMacdFilter: z.boolean().default(false),
+  useBreakevenStop: z.boolean().default(false),
+  breakevenTriggerPct: z.coerce.number().min(0.1).max(20).default(1.5),
 }).refine(data => data.isVolatileMode || data.coinIds.length > 0, {
   message: 'En az 1 coin seçin',
   path: ['coinIds'],
@@ -52,11 +67,11 @@ const DEFAULT_VALUES = (indicatorId?: number): FormData => ({
   coinIds: [],
   timeframe: '5m',
   trailingStopPct: 2.5,
-  stopLossPct: 1.5,
-  takeProfitPct: 3.0,
+  stopLossPct: 2.0,
+  takeProfitPct: null,
   minVolumeUsdt: null,
   volatilePositionSizePct: null,
-  volatileMinChangePct: 3,
+  volatileMinChangePct: 5,
   volatileGainerLimit: 20,
   momentumFreshFilterMinutes: 5,
   isVolatileMode: false,
@@ -65,11 +80,25 @@ const DEFAULT_VALUES = (indicatorId?: number): FormData => ({
   atrPeriod: 14,
   atrSlMultiplier: 1.5,
   atrTpMultiplier: 3.0,
-  partialTpPct: null,
+  partialTpPct: 2.0,
   partialTpClosePct: 50,
-  isVolumeSurgeFilterEnabled: false,
-  volumeSurgeMultiplier: 1.5,
-  useMarketRegimeFilter: false,
+  isVolumeSurgeFilterEnabled: true,
+  volumeSurgeMultiplier: 2.0,
+  useMarketRegimeFilter: true,
+  maxHoldHours: 8,
+  slCooldownHours: 4,
+  isGreenCandleFilterEnabled: true,
+  isEma200RuleEnabled: true,
+  maxOpenPositions: 5,
+  maxPositionSizeUsdt: null,
+  maxPositionSizePct: null,
+  minPositionSizeUsdt: 10,
+  useAdxFilter: true,
+  adxPeriod: 14,
+  adxMinValue: 25,
+  useMacdFilter: true,
+  useBreakevenStop: true,
+  breakevenTriggerPct: 1.5,
 })
 
 const RE_ENTRY_COLOR: Record<number, string> = {
@@ -88,6 +117,7 @@ interface DeactivateConfirm {
 
 export default function StrategyPage() {
   const qc = useQueryClient()
+  const isAdmin = useAuthStore(s => s.isAdmin)()
   const [editing, setEditing] = useState<Strategy | null>(null)
   const [creating, setCreating] = useState(false)
   const [toggleError, setToggleError] = useState<string | null>(null)
@@ -201,7 +231,11 @@ export default function StrategyPage() {
           <StrategyForm
             key={editing?.id ?? 'new'}
             coins={(coins ?? []).filter(c => c.isInWatchlist)}
-            indicators={(indicators ?? []).filter(i => i.isEnabled && i.name.toLowerCase() !== 'rsi')}
+            indicators={(indicators ?? []).filter(i =>
+              i.isEnabled &&
+              i.name.toLowerCase() !== 'rsi' &&
+              (isAdmin || i.subscriptionIsActive)
+            )}
             usedCoinIds={usedCoinIds}
             initialValues={editing
               ? {
@@ -228,6 +262,20 @@ export default function StrategyPage() {
                   isVolumeSurgeFilterEnabled: editing.isVolumeSurgeFilterEnabled ?? false,
                   volumeSurgeMultiplier: editing.volumeSurgeMultiplier ?? 1.5,
                   useMarketRegimeFilter: editing.useMarketRegimeFilter ?? false,
+                  maxHoldHours: editing.maxHoldHours ?? 8,
+                  slCooldownHours: editing.slCooldownHours ?? 2,
+                  isGreenCandleFilterEnabled: editing.isGreenCandleFilterEnabled ?? true,
+                  isEma200RuleEnabled: editing.isEma200RuleEnabled ?? true,
+                  maxOpenPositions: editing.maxOpenPositions ?? 5,
+                  maxPositionSizeUsdt: editing.maxPositionSizeUsdt ?? null,
+                  maxPositionSizePct: editing.maxPositionSizePct ?? null,
+                  minPositionSizeUsdt: editing.minPositionSizeUsdt ?? 10,
+                  useAdxFilter: editing.useAdxFilter ?? false,
+                  adxPeriod: editing.adxPeriod ?? 14,
+                  adxMinValue: editing.adxMinValue ?? 25,
+                  useMacdFilter: editing.useMacdFilter ?? false,
+                  useBreakevenStop: editing.useBreakevenStop ?? false,
+                  breakevenTriggerPct: editing.breakevenTriggerPct ?? 1.5,
                 }
               : DEFAULT_VALUES(indicators?.[0]?.indicatorId)}
             isEditing={!!editing}
@@ -259,6 +307,20 @@ export default function StrategyPage() {
                 isVolumeSurgeFilterEnabled: data.isVolumeSurgeFilterEnabled ?? false,
                 volumeSurgeMultiplier: data.volumeSurgeMultiplier ?? 1.5,
                 useMarketRegimeFilter: data.useMarketRegimeFilter ?? false,
+                maxHoldHours: data.maxHoldHours ?? 8,
+                slCooldownHours: data.slCooldownHours ?? 2,
+                isGreenCandleFilterEnabled: data.isGreenCandleFilterEnabled ?? true,
+                isEma200RuleEnabled: data.isEma200RuleEnabled ?? true,
+                maxOpenPositions: data.maxOpenPositions ?? 5,
+                maxPositionSizeUsdt: data.maxPositionSizeUsdt ?? null,
+                maxPositionSizePct: data.maxPositionSizePct ?? null,
+                minPositionSizeUsdt: data.minPositionSizeUsdt ?? 10,
+                useAdxFilter: data.useAdxFilter ?? false,
+                adxPeriod: data.adxPeriod ?? 14,
+                adxMinValue: data.adxMinValue ?? 25,
+                useMacdFilter: data.useMacdFilter ?? false,
+                useBreakevenStop: data.useBreakevenStop ?? false,
+                breakevenTriggerPct: data.breakevenTriggerPct ?? 1.5,
               }
               if (editing) updateMut.mutate({ id: editing.id, req })
               else createMut.mutate(req)
@@ -485,6 +547,11 @@ function StrategyCard({
                 <AlertCircle size={10} /> BTC Rejim
               </span>
             )}
+            {strategy.isEma200RuleEnabled && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium border bg-indigo-500/15 text-indigo-400 border-indigo-500/30 flex items-center gap-1">
+                <TrendingUp size={10} /> EMA200
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             {strategy.indicatorDisplayName && (
@@ -609,6 +676,23 @@ function StrategyForm({
   const useAtrBasedStops = watch('useAtrBasedStops')
   const isVolumeSurgeFilterEnabled = watch('isVolumeSurgeFilterEnabled')
   const useMarketRegimeFilter = watch('useMarketRegimeFilter')
+  const isGreenCandleFilterEnabled = watch('isGreenCandleFilterEnabled')
+  const useAdxFilter = watch('useAdxFilter')
+  const useMacdFilter = watch('useMacdFilter')
+  const useBreakevenStop = watch('useBreakevenStop')
+  const isEma200RuleEnabled = watch('isEma200RuleEnabled')
+
+  const [usePartialTp, setUsePartialTp] = useState(initialValues.partialTpPct != null)
+
+  const togglePartialTp = () => {
+    const next = !usePartialTp
+    setUsePartialTp(next)
+    if (!next) {
+      setValue('partialTpPct', null as any)
+    } else {
+      setValue('partialTpPct', 2.0)
+    }
+  }
 
   const toggleCoin = (id: number) => {
     const current = selectedCoinIds ?? []
@@ -656,6 +740,20 @@ function StrategyForm({
         isVolumeSurgeFilterEnabled: d.isVolumeSurgeFilterEnabled ?? false,
         volumeSurgeMultiplier: d.volumeSurgeMultiplier ?? 1.5,
         useMarketRegimeFilter: d.useMarketRegimeFilter ?? false,
+        maxHoldHours: d.maxHoldHours ?? 8,
+        slCooldownHours: d.slCooldownHours ?? 2,
+        isGreenCandleFilterEnabled: d.isGreenCandleFilterEnabled ?? true,
+        isEma200RuleEnabled: d.isEma200RuleEnabled ?? true,
+        maxOpenPositions: d.maxOpenPositions ?? 5,
+        maxPositionSizeUsdt: d.maxPositionSizeUsdt ?? null,
+        maxPositionSizePct: d.maxPositionSizePct ?? null,
+        minPositionSizeUsdt: d.minPositionSizeUsdt ?? 10,
+        useAdxFilter: d.useAdxFilter ?? false,
+        adxPeriod: d.adxPeriod ?? 14,
+        adxMinValue: d.adxMinValue ?? 25,
+        useMacdFilter: d.useMacdFilter ?? false,
+        useBreakevenStop: d.useBreakevenStop ?? false,
+        breakevenTriggerPct: d.breakevenTriggerPct ?? 1.5,
       }))} className="space-y-4">
 
         {/* Indicator */}
@@ -720,6 +818,9 @@ function StrategyForm({
                 className={inputCls} />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">%</span>
             </div>
+            <p className="text-xs text-slate-600 mt-1">
+              Fiyat, ulaştığı en yüksek noktadan bu kadar % geri çekilirse pozisyon otomatik kapanır. Kârı korumak için kullanılır — <span className="text-yellow-400">küçük değer</span> kârı erken kilitler ama hareketin devamını kaçırma riski taşır, <span className="text-yellow-400">büyük değer</span> daha fazla yükselişe izin verir ama geri çekilmede daha çok kâr geri verir.
+            </p>
             {errors.trailingStopPct && <p className="text-xs text-red-400 mt-0.5">{errors.trailingStopPct.message}</p>}
           </div>
           <div>
@@ -729,6 +830,9 @@ function StrategyForm({
                 className={inputCls} />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">%</span>
             </div>
+            <p className="text-xs text-slate-600 mt-1">
+              Fiyat, giriş (alım) fiyatınızın bu kadar % altına inerse pozisyon zarar kesilerek kapanır. Kabul edebileceğiniz maksimum kayıp sınırıdır.
+            </p>
             {errors.stopLossPct && <p className="text-xs text-red-400 mt-0.5">{errors.stopLossPct.message}</p>}
           </div>
         </div>
@@ -747,6 +851,9 @@ function StrategyForm({
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">%</span>
           </div>
+          <p className="text-xs text-slate-600 mt-1">
+            Fiyat, giriş fiyatınızın bu kadar % üzerine çıkarsa pozisyon tamamen kapanıp kâr kesin olarak alınır. Boş bırakılırsa sabit bir hedef olmaz, çıkış kararını Trailing Stop / Stop Loss / T3 sinyaline bırakırsınız.
+          </p>
           {errors.takeProfitPct && <p className="text-xs text-red-400 mt-0.5">{errors.takeProfitPct.message}</p>}
         </div>
 
@@ -764,6 +871,9 @@ function StrategyForm({
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
           </div>
+          <p className="text-xs text-slate-600 mt-1">
+            Son 24 mumun ortalama işlem hacmi (USDT) bu değerin altındaysa AL sinyali üretilmez. Düşük hacimli/işlemsiz coinlerde takılmamak için kullanılır.
+          </p>
           {errors.minVolumeUsdt && <p className="text-xs text-red-400 mt-0.5">{errors.minVolumeUsdt.message}</p>}
         </div>
 
@@ -899,10 +1009,108 @@ function StrategyForm({
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              AL sinyalini RSI (14) &gt; 50 ile onaylar — zayıf momentumdaki girişleri engeller.
+              RSI, fiyatın ne kadar "aşırı alınmış/satılmış" olduğunu 0-100 arası ölçer. Bu filtre açıkken AL sinyali yalnızca RSI 50'nin üzerindeyken (yani yukarı momentum varken) işleme alınır — zayıf/sahte dönüşleri eler. <span className="text-slate-600">Önerimiz: önce kapalı test edin, sinyal sayısı azalır ama kalitesi artar.</span>
             </p>
           </div>
         </div>
+
+        {/* ADX Filtresi */}
+        <div
+          onClick={() => setValue('useAdxFilter', !useAdxFilter)}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            useAdxFilter
+              ? 'bg-violet-500/10 border-violet-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5', useAdxFilter ? 'bg-violet-500/20' : 'bg-white/5')}>
+            <BarChart2 size={15} className={useAdxFilter ? 'text-violet-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', useAdxFilter ? 'text-violet-300' : 'text-slate-300')}>ADX Filtresi</p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', useAdxFilter ? 'bg-violet-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useAdxFilter ? 'left-4' : 'left-0.5')} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              ADX (Average Directional Index) trend gücünü ölçer. 25+ değer güçlü bir trend varlığını gösterir. Bu filtre açıkken AL sinyali yalnızca trendin yeterince güçlü olduğunda tetiklenir — yatay piyasadaki sahte dönüşleri engeller.
+            </p>
+          </div>
+        </div>
+        {useAdxFilter && (
+          <div className="grid grid-cols-2 gap-3 pl-2" onClick={e => e.stopPropagation()}>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">ADX Periyot</label>
+              <input {...register('adxPeriod')} type="number" step="1" min="5" max="50" className={inputCls} />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Min ADX Değeri</label>
+              <input {...register('adxMinValue')} type="number" step="1" min="10" max="60" className={inputCls} />
+              <p className="text-xs text-slate-600 mt-0.5">Önerilen: 20-30 arası</p>
+            </div>
+          </div>
+        )}
+
+        {/* MACD Filtresi */}
+        <div
+          onClick={() => setValue('useMacdFilter', !useMacdFilter)}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            useMacdFilter
+              ? 'bg-teal-500/10 border-teal-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5', useMacdFilter ? 'bg-teal-500/20' : 'bg-white/5')}>
+            <TrendingUp size={15} className={useMacdFilter ? 'text-teal-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', useMacdFilter ? 'text-teal-300' : 'text-slate-300')}>MACD Konfirmasyonu</p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', useMacdFilter ? 'bg-teal-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useMacdFilter ? 'left-4' : 'left-0.5')} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              MACD (12,26,9) histogram pozitif olduğunda momentum yukarı yönlüdür. Bu filtre açıkken AL sinyali yalnızca MACD histogram &gt; 0 olduğunda gerçekleşir — T3 dönüşünü momentum ile çifte onaylar.
+            </p>
+          </div>
+        </div>
+
+        {/* Breakeven Stop */}
+        <div
+          onClick={() => setValue('useBreakevenStop', !useBreakevenStop)}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            useBreakevenStop
+              ? 'bg-emerald-500/10 border-emerald-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5', useBreakevenStop ? 'bg-emerald-500/20' : 'bg-white/5')}>
+            <DollarSign size={15} className={useBreakevenStop ? 'text-emerald-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', useBreakevenStop ? 'text-emerald-300' : 'text-slate-300')}>Breakeven Stop</p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', useBreakevenStop ? 'bg-emerald-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useBreakevenStop ? 'left-4' : 'left-0.5')} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Pozisyon belirli bir kâra ulaştığında Stop Loss otomatik olarak giriş fiyatına çekilir. Bu sayede kâra geçilen işlemlerde zarar yaşanmaz — "sıfır zarar noktası" garantisi sağlar.
+            </p>
+          </div>
+        </div>
+        {useBreakevenStop && (
+          <div className="pl-2" onClick={e => e.stopPropagation()}>
+            <label className="text-xs text-slate-400 block mb-1">Tetiklenme Kâr Eşiği (%)</label>
+            <input {...register('breakevenTriggerPct')} type="number" step="0.1" min="0.1" max="20" className={`${inputCls} max-w-xs`} />
+            <p className="text-xs text-slate-600 mt-0.5">Pozisyon bu % kâra ulaşınca SL giriş fiyatına taşınır. Önerilen: 1.0–2.0</p>
+          </div>
+        )}
 
         {/* ATR Tabanlı Stop */}
         <div
@@ -930,7 +1138,7 @@ function StrategyForm({
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              SL ve TP'yi ATR (volatilite) bazlı dinamik hesaplar — sabit % yerine piyasa koşullarına uyum sağlar.
+              ATR, coin'in son dönemdeki ortalama fiyat hareket aralığını (oynaklığını) ölçer. Bu açıkken Stop Loss / Take Profit yüzdeleri sabit kalmaz, her coin için kendi oynaklığına göre otomatik hesaplanır — sakin coinde dar, oynak coinde geniş stop konur. <span className="text-slate-600">Önerimiz: önce kapalı bırakın, davranışı öngörmesi daha kolay.</span>
             </p>
           </div>
         </div>
@@ -955,21 +1163,46 @@ function StrategyForm({
         )}
 
         {/* Kısmi Kâr Al */}
-        <div>
-          <label className="text-xs text-slate-400 block mb-1">
-            Kısmi TP % <span className="text-slate-600">(boş = devre dışı)</span>
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <input {...register('partialTpPct')} type="number" step="0.1" min="0.1" max="100" placeholder="Örn: 2.5" className={inputCls} />
-              <p className="text-xs text-slate-600 mt-0.5">İlk TP hedefi (%)</p>
-              {errors.partialTpPct && <p className="text-xs text-red-400 mt-0.5">{errors.partialTpPct.message}</p>}
+        <div
+          onClick={togglePartialTp}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            usePartialTp
+              ? 'bg-emerald-500/10 border-emerald-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5 transition-colors', usePartialTp ? 'bg-emerald-500/20' : 'bg-white/5')}>
+            <TrendingUp size={15} className={usePartialTp ? 'text-emerald-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', usePartialTp ? 'text-emerald-300' : 'text-slate-300')}>
+                Kısmi TP Kullan
+              </p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', usePartialTp ? 'bg-emerald-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', usePartialTp ? 'left-4' : 'left-0.5')} />
+              </div>
             </div>
-            <div>
-              <input {...register('partialTpClosePct')} type="number" step="1" min="10" max="90" className={inputCls} />
-              <p className="text-xs text-slate-600 mt-0.5">Kapatılacak oran (%)</p>
-              {errors.partialTpClosePct && <p className="text-xs text-red-400 mt-0.5">{errors.partialTpClosePct.message}</p>}
-            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Fiyat girişten belirlenen % yükselince pozisyonun bir kısmı otomatik satılıp kâr kesinleştirilir, kalan kısım pozisyonda kalmaya devam eder. <span className="text-emerald-400">Küçük kazançların elden gitmesini önlemenin en etkili yolu.</span>
+            </p>
+            {usePartialTp && (
+              <div className="grid grid-cols-2 gap-3 mt-3" onClick={e => e.stopPropagation()}>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">TP Hedefi (%)</label>
+                  <input {...register('partialTpPct')} type="number" step="0.1" min="0.1" max="100" placeholder="Örn: 1.5" className={inputCls} />
+                  <p className="text-xs text-slate-600 mt-0.5">Fiyat bu kadar yükselince tetiklenir</p>
+                  {errors.partialTpPct && <p className="text-xs text-red-400 mt-0.5">{errors.partialTpPct.message}</p>}
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Kapatılacak Oran (%)</label>
+                  <input {...register('partialTpClosePct')} type="number" step="1" min="10" max="90" className={inputCls} />
+                  <p className="text-xs text-slate-600 mt-0.5">Pozisyonun ne kadarı satılsın</p>
+                  {errors.partialTpClosePct && <p className="text-xs text-red-400 mt-0.5">{errors.partialTpClosePct.message}</p>}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -996,7 +1229,7 @@ function StrategyForm({
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              AL sinyalini yalnızca son mum hacmi 20-bar ortalamasının N katını geçtiğinde üretir.
+              AL sinyalini yalnızca son mumdaki işlem hacmi, son 20 mumun ortalamasının belirlediğiniz katı kadar üzerindeyken üretir — gerçek bir alım baskısı/heyecan olmadan oluşan sahte/gürültülü hareketleri eler. <span className="text-slate-600">Önerimiz: önce kapalı test edin.</span>
             </p>
             {isVolumeSurgeFilterEnabled && (
               <div className="mt-2" onClick={e => e.stopPropagation()}>
@@ -1031,8 +1264,152 @@ function StrategyForm({
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              BTC/USDT günlük EMA200 altındayken (ayı piyasası) yeni AL sinyali üretmez.
+              BTC/USDT fiyatı kendi 200 günlük ortalamasının (EMA200) altındayken genel piyasa "ayı" (düşüş) modunda sayılır ve bu durumda yeni AL sinyali üretilmez. Genel piyasa düşerken akıntıya karşı işlem açmayı engelleyerek sermayeyi korur. <span className="text-emerald-400">Önerimiz: açık bırakın.</span>
             </p>
+          </div>
+        </div>
+
+        {/* Koruma Ayarları — Maksimum Tutma & SL Cooldown */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs text-slate-400">Maks. Tutma Süresi (saat)</label>
+            <div className="relative mt-1">
+              <input {...register('maxHoldHours')} type="number" step="1" min="1" max="72"
+                className={inputCls} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">sa</span>
+            </div>
+            <p className="text-xs text-slate-600 mt-1">
+              Bu süreden uzun açık kalan pozisyon zorla kapatılır. Uzun süre takılıp kalan coinleri serbest bırakır. <span className="text-yellow-400">Önerimiz: 8–12sa.</span>
+            </p>
+            {errors.maxHoldHours && <p className="text-xs text-red-400 mt-0.5">{errors.maxHoldHours.message}</p>}
+          </div>
+          <div>
+            <label className="text-xs text-slate-400">Stop Loss Cooldown (saat)</label>
+            <div className="relative mt-1">
+              <input {...register('slCooldownHours')} type="number" step="1" min="0" max="24"
+                className={inputCls} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">sa</span>
+            </div>
+            <p className="text-xs text-slate-600 mt-1">
+              Stop Loss ile kapanan coinde bu kadar saat yeniden giriş yapılmaz. Ardı ardına SL vurmasını önler. <span className="text-yellow-400">0 = devre dışı.</span>
+            </p>
+            {errors.slCooldownHours && <p className="text-xs text-red-400 mt-0.5">{errors.slCooldownHours.message}</p>}
+          </div>
+        </div>
+
+        {/* Yeşil Mum Filtresi */}
+        <div
+          onClick={() => setValue('isGreenCandleFilterEnabled', !isGreenCandleFilterEnabled)}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            isGreenCandleFilterEnabled
+              ? 'bg-emerald-500/10 border-emerald-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5 transition-colors', isGreenCandleFilterEnabled ? 'bg-emerald-500/20' : 'bg-white/5')}>
+            <TrendingUp size={15} className={isGreenCandleFilterEnabled ? 'text-emerald-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', isGreenCandleFilterEnabled ? 'text-emerald-300' : 'text-slate-300')}>
+                Yeşil Mum Filtresi
+              </p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', isGreenCandleFilterEnabled ? 'bg-emerald-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', isGreenCandleFilterEnabled ? 'left-4' : 'left-0.5')} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Son kapanmış mum kırmızıysa (kapanış &lt; açılış) giriş yapılmaz. Trendin tersine, aşağı momentumda giriş yapmayı engeller. <span className="text-emerald-400">Önerimiz: açık bırakın.</span>
+            </p>
+          </div>
+        </div>
+
+        {/* EMA200 Coin Filtresi */}
+        <div
+          onClick={() => setValue('isEma200RuleEnabled', !isEma200RuleEnabled)}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            isEma200RuleEnabled
+              ? 'bg-indigo-500/10 border-indigo-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5 transition-colors', isEma200RuleEnabled ? 'bg-indigo-500/20' : 'bg-white/5')}>
+            <TrendingUp size={15} className={isEma200RuleEnabled ? 'text-indigo-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', isEma200RuleEnabled ? 'text-indigo-300' : 'text-slate-300')}>
+                EMA200 Coin Filtresi
+              </p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', isEma200RuleEnabled ? 'bg-indigo-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', isEma200RuleEnabled ? 'left-4' : 'left-0.5')} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Her coin için kendi 200 periyotluk EMA'sı hesaplanır; fiyat EMA200'ün altındaysa o coin için AL sinyali üretilmez. Düşüş trendindeki coinlere "dip alımı" yaparak yakalanmayı önler. <span className="text-indigo-400">Önerimiz: açık bırakın.</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Pozisyon Limitleri */}
+        <div className="space-y-3 p-4 rounded-xl bg-white/[0.02] border border-white/8">
+          <div className="flex items-center gap-2">
+            <DollarSign size={13} className="text-slate-400" />
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Pozisyon Limitleri</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-slate-400">Maks. Eş Zamanlı Pozisyon</label>
+              <div className="relative mt-1">
+                <input {...register('maxOpenPositions')} type="number" step="1" min="1" max="20" className={inputCls} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">adet</span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1">Bu strateji aynı anda en fazla kaç coin tutabilir.</p>
+              {errors.maxOpenPositions && <p className="text-xs text-red-400 mt-0.5">{(errors.maxOpenPositions as any).message}</p>}
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Min. Emir Tutarı (USDT)</label>
+              <div className="relative mt-1">
+                <input {...register('minPositionSizeUsdt')} type="number" step="1" min="5" max="10000" className={inputCls} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1">Bu tutarın altındaki emirler açılmaz. Binance min. 10 USDT gerektirir.</p>
+              {errors.minPositionSizeUsdt && <p className="text-xs text-red-400 mt-0.5">{(errors.minPositionSizeUsdt as any).message}</p>}
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">
+                Sabit Pozisyon Boyutu <span className="text-slate-600">(opsiyonel)</span>
+              </label>
+              <div className="relative mt-1">
+                <input
+                  {...register('maxPositionSizeUsdt', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })}
+                  type="number" step="1" min="1"
+                  placeholder="Boş = % bazlı hesap"
+                  className={inputCls}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1">Her emir bu sabit miktarda açılır. Dolu ise % ayarını geçersiz kılar.</p>
+              {errors.maxPositionSizeUsdt && <p className="text-xs text-red-400 mt-0.5">{(errors.maxPositionSizeUsdt as any).message}</p>}
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">
+                Pozisyon Boyutu % <span className="text-slate-600">(opsiyonel)</span>
+              </label>
+              <div className="relative mt-1">
+                <input
+                  {...register('maxPositionSizePct', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })}
+                  type="number" step="1" min="1" max="100"
+                  placeholder="Boş = Ayarlar'daki değer"
+                  className={inputCls}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">%</span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1">USDT bakiyesinin yüzdesi. Sabit USDT girilmişse görmezden gelinir.</p>
+              {errors.maxPositionSizePct && <p className="text-xs text-red-400 mt-0.5">{(errors.maxPositionSizePct as any).message}</p>}
+            </div>
           </div>
         </div>
 

@@ -31,10 +31,24 @@ export interface Strategy {
   isVolumeSurgeFilterEnabled: boolean
   volumeSurgeMultiplier: number
   useMarketRegimeFilter: boolean
+  maxHoldHours: number
+  slCooldownHours: number
+  isGreenCandleFilterEnabled: boolean
+  isEma200RuleEnabled: boolean
   isActive: boolean
   isRealTradeEnabled: boolean
   isVolatileMode: boolean
   activatedAt: string | null
+  maxOpenPositions: number
+  maxPositionSizeUsdt: number | null
+  maxPositionSizePct: number | null
+  minPositionSizeUsdt: number
+  useAdxFilter: boolean
+  adxPeriod: number
+  adxMinValue: number
+  useMacdFilter: boolean
+  useBreakevenStop: boolean
+  breakevenTriggerPct: number
   coins: StrategyCoin[]
 }
 
@@ -62,6 +76,20 @@ export interface UpsertStrategyRequest {
   isVolumeSurgeFilterEnabled: boolean
   volumeSurgeMultiplier: number
   useMarketRegimeFilter: boolean
+  maxHoldHours: number
+  slCooldownHours: number
+  isGreenCandleFilterEnabled: boolean
+  isEma200RuleEnabled: boolean
+  maxOpenPositions: number
+  maxPositionSizeUsdt: number | null
+  maxPositionSizePct: number | null
+  minPositionSizeUsdt: number
+  useAdxFilter: boolean
+  adxPeriod: number
+  adxMinValue: number
+  useMacdFilter: boolean
+  useBreakevenStop: boolean
+  breakevenTriggerPct: number
 }
 
 export interface CoinMonitor {
@@ -86,6 +114,14 @@ export interface StrategyMonitor {
   name: string
   timeframe: string
   coins: CoinMonitor[]
+  isRsiFilterEnabled: boolean
+  isVolumeSurgeFilterEnabled: boolean
+  volumeSurgeMultiplier: number
+  minVolumeUsdt: number | null
+  useMarketRegimeFilter: boolean
+  t3Period: number
+  t3VFactor: number
+  activatedAt: string | null
 }
 
 export const RE_ENTRY_LABEL: Record<number, string> = {

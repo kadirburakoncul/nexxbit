@@ -11,6 +11,7 @@ public class AutoTradeService(
     IApplicationDbContext db,
     IBinanceService binance,
     ITelegramService telegram,
+    IEmailService emailService,
     ILogger<AutoTradeService> logger) : IAutoTradeService
 {
     public async Task ProcessSignalAsync(TradeSignal signal, CancellationToken ct = default)
@@ -28,10 +29,93 @@ public class AutoTradeService(
                 .FirstOrDefaultAsync(p => p.UserId == signal.UserId && p.CoinId == signal.CoinId
                     && p.Status == PositionStatus.Open && p.IsVirtual
                     && p.StrategyId != signal.StrategyId, ct);
-            if (blocking == null)
-                await OpenVirtualPositionAsync(signal, strategy, ct);
+            if (blocking != null)
+            {
+                logger.LogDebug("Sanal AL bloklandı: {CoinId} başka strateji {SId} tutuyor", signal.CoinId, blocking.StrategyId);
+            }
             else
-                logger.LogDebug("Sanal AL bloklandı: {CoinId} başka strateji {SId} tutıyor", signal.CoinId, blocking.StrategyId);
+            {
+                // Re-entry cooldown: aynı coin son 30dk içinde herhangi bir nedenle kapanmışsa bekle
+                var cooldownCutoff = DateTime.UtcNow.AddMinutes(-30);
+                var recentlyClosed = await db.Positions
+                    .AnyAsync(p => p.UserId == signal.UserId
+                        && p.CoinId == signal.CoinId
+                        && p.StrategyId == signal.StrategyId
+                        && p.Status == PositionStatus.Closed
+                        && p.IsVirtual
+                        && p.ClosedAt >= cooldownCutoff, ct);
+                if (recentlyClosed)
+                {
+                    logger.LogDebug(
+                        "Re-entry cooldown (30dk): {CoinId} son 30dk içinde kapandı, yeniden giriş engellendi",
+                        signal.CoinId);
+                }
+                else
+                {
+                    // G: SL ve TrailingStop özel cooldown — strateji ayarından alınır (varsayılan 4sa)
+                    var slCooldownHours = strategy?.SlCooldownHours ?? 4;
+                    var slCutoff = DateTime.UtcNow.AddHours(-slCooldownHours);
+                    var recentStopLoss = await db.Positions
+                        .AnyAsync(p => p.UserId == signal.UserId
+                            && p.CoinId == signal.CoinId
+                            && p.StrategyId == signal.StrategyId
+                            && p.Status == PositionStatus.Closed
+                            && p.IsVirtual
+                            && (p.CloseReason == "StopLoss" || p.CloseReason == "TrailingStop")
+                            && p.ClosedAt >= slCutoff, ct);
+                    if (recentStopLoss)
+                    {
+                        logger.LogDebug(
+                            "SL/Trailing cooldown ({Hours}sa): {CoinId} son {Hours} saat içinde zarar ile kapandı, giriş engellendi",
+                            slCooldownHours, signal.CoinId, slCooldownHours);
+                    }
+                    else
+                    {
+                    // Düşen bıçak + H: kırmızı mum filtresi
+                    bool fallingKnife = false;
+                    var entrySymbol = signal.Coin?.Symbol ?? await GetSymbolAsync(signal.CoinId, ct);
+                    if (entrySymbol != null)
+                    {
+                        var cr = await binance.GetCandlesAsync(entrySymbol, strategy?.Timeframe ?? "5m", 3, ct);
+                        if (cr.Succeeded && cr.Data?.Count >= 2)
+                        {
+                            var chg = (cr.Data[^1].Close - cr.Data[^2].Close) / cr.Data[^2].Close * 100m;
+                            if (chg < -0.5m)
+                            {
+                                fallingKnife = true;
+                                logger.LogDebug("Düşen bıçak: {Symbol} son mum -%{Chg:F2}, giriş engellendi",
+                                    entrySymbol, Math.Abs(chg));
+                            }
+                            // H: Son kapanmış mum kırmızıysa giriş yapma (strateji ayarından kontrol edilir)
+                            else if (strategy?.IsGreenCandleFilterEnabled != false
+                                && cr.Data[^2].Close < cr.Data[^2].Open)
+                            {
+                                fallingKnife = true;
+                                logger.LogDebug("Kırmızı mum: {Symbol} son kapanış < açılış, giriş engellendi",
+                                    entrySymbol);
+                            }
+                        }
+                    }
+
+                    if (!fallingKnife)
+                    {
+                        // Strateji bazlı maksimum eş zamanlı açık pozisyon limiti
+                        var maxOpenPositions = strategy?.MaxOpenPositions ?? 5;
+                        var openCount = await db.Positions
+                            .CountAsync(p => p.UserId == signal.UserId
+                                && p.Status == PositionStatus.Open
+                                && p.IsVirtual
+                                && p.StrategyId == signal.StrategyId, ct);
+                        if (openCount >= maxOpenPositions)
+                            logger.LogInformation(
+                                "Max pozisyon limiti ({Max}) doldu: CoinId={CoinId} atlandı",
+                                maxOpenPositions, signal.CoinId);
+                        else
+                            await OpenVirtualPositionAsync(signal, strategy, ct);
+                    }
+                    } // end StopLoss cooldown
+                }
+            }
         }
         else if (signal.Direction is SignalDirection.Sell or SignalDirection.StrongSell)
         {
@@ -64,6 +148,18 @@ public class AutoTradeService(
             if (IsDailyLossExceeded(risk))
             {
                 logger.LogWarning("Günlük kayıp limiti aşıldı, sinyal bloklandı: UserId={UserId}", signal.UserId);
+                return;
+            }
+        }
+
+        if (signal.Direction == SignalDirection.Buy && risk is not null && risk.MaxOpenPositions > 0)
+        {
+            var openRealCount = await db.Positions.CountAsync(p =>
+                p.UserId == signal.UserId && p.Status == PositionStatus.Open && !p.IsVirtual, ct);
+            if (openRealCount >= risk.MaxOpenPositions)
+            {
+                logger.LogWarning("Maks. açık pozisyon limiti doldu ({Count}/{Max}), sinyal bloklandı: UserId={UserId}",
+                    openRealCount, risk.MaxOpenPositions, signal.UserId);
                 return;
             }
         }
@@ -116,22 +212,29 @@ public class AutoTradeService(
                 return Result.Failure("Bu coin başka bir strateji tarafından tutuluyor.");
             }
 
-            // Maksimum 5 eş zamanlı gerçek pozisyon kontrolü
+            // Strateji bazlı maksimum eş zamanlı gerçek pozisyon kontrolü
+            var maxRealPositions = strategy?.MaxOpenPositions ?? 5;
             var openRealCount = await db.Positions
                 .CountAsync(p => p.UserId == signal.UserId && p.Status == PositionStatus.Open && !p.IsVirtual, ct);
-            if (openRealCount >= 5)
+            if (openRealCount >= maxRealPositions)
             {
-                logger.LogWarning("Max pozisyon sınırına ulaşıldı (5): UserId={UserId}", signal.UserId);
-                return Result.Failure("Maksimum 5 eş zamanlı açık pozisyon sınırına ulaşıldı.");
+                logger.LogWarning("Max pozisyon sınırına ulaşıldı ({Max}): UserId={UserId}", maxRealPositions, signal.UserId);
+                return Result.Failure($"Maksimum {maxRealPositions} eş zamanlı açık pozisyon sınırına ulaşıldı.");
             }
 
-            bool isVolatileMode = strategy?.IsVolatileMode ?? false;
-            decimal? volatilePosSizePct = strategy?.VolatilePositionSizePct;
-            orderQty = await CalculateOrderSizeAsync(signal.UserId, risk, isVolatileMode, volatilePosSizePct, ct);
+            orderQty = await CalculateOrderSizeAsync(signal.UserId, risk, strategy, ct);
             if (orderQty <= 0)
             {
-                logger.LogWarning("Yetersiz bakiye veya pozisyon boyutu 0: UserId={UserId}", signal.UserId);
+                logger.LogWarning("Yetersiz bakiye veya geçici API hatası — emir atlandı, strateji korundu: UserId={UserId} Strateji={StratName}",
+                    signal.UserId, strategy?.Name);
                 return Result.Failure("Yetersiz bakiye.");
+            }
+            var minOrderSize = strategy?.MinPositionSizeUsdt ?? 10m;
+            if (orderQty < minOrderSize)
+            {
+                logger.LogWarning("Min emir tutarı karşılanmıyor: {Qty:F2} USDT < {Min:F2} USDT, {Symbol} atlandı (strateji devre dışı bırakılmadı)",
+                    orderQty, minOrderSize, symbol);
+                return Result.Failure($"Emir tutarı minimum {minOrderSize:F0} USDT altında ({orderQty:F2} USDT).");
             }
         }
         else
@@ -229,17 +332,20 @@ public class AutoTradeService(
             logger.LogError("Emir kalıcı olarak başarısız ({MaxAttempts} deneme): {Symbol} {Error}",
                 maxAttempts, symbol, orderRecord.ErrorMessage);
 
-            db.Notifications.Add(new Notification
+            var errMsg = orderRecord.ErrorMessage ?? "";
+            var isNotionalError = errMsg.Contains("NOTIONAL", StringComparison.OrdinalIgnoreCase)
+                || errMsg.Contains("MIN_NOTIONAL", StringComparison.OrdinalIgnoreCase)
+                || errMsg.Contains("LOT_SIZE", StringComparison.OrdinalIgnoreCase);
+
+            if (isNotionalError)
             {
-                UserId = signal.UserId,
-                Type = NotificationType.BinanceError,
-                Channel = NotificationChannel.InApp,
-                Title = $"Emir Başarısız: {symbol}",
-                Body = $"{side} emri {maxAttempts} denemede başarısız oldu. Hata: {orderRecord.ErrorMessage}",
-            });
-            await SendTelegramAsync(signal.UserId, risk,
-                $"⚠️ <b>Emir Başarısız: {symbol}</b>\n" +
-                $"Yön: {side} | Hata: {orderRecord.ErrorMessage}", ct);
+                logger.LogWarning("NOTIONAL/LOT_SIZE hatası — strateji devre dışı bırakılmıyor, sadece bu emir atlandı: {Symbol}", symbol);
+            }
+            else
+            {
+                await DisableRealTradeAsync(strategy, signal.UserId, symbol,
+                    $"{side} emri başarısız: {orderRecord.ErrorMessage}", ct);
+            }
         }
 
         await db.SaveChangesAsync(ct);
@@ -261,8 +367,8 @@ public class AutoTradeService(
             CoinId = signal.CoinId,
             StrategyId = signal.StrategyId != Guid.Empty ? signal.StrategyId : null,
             EntryPrice = signal.Price,
-            EntryQuantity = 0,
-            EntryValueUsdt = 0,
+            EntryQuantity = signal.Price > 0 ? Math.Round(100m / signal.Price, 8) : 0m,
+            EntryValueUsdt = 100m, // $100 sanal simülasyon
             StopLossPrice = slPrice,
             TakeProfitPrice = tpPrice,
             TrailingStopPct = trailingPct,
@@ -309,8 +415,10 @@ public class AutoTradeService(
 
     private async Task OpenRealPositionAsync(TradeSignal signal, TradeOrder order, decimal price, decimal valueUsdt, CancellationToken ct)
     {
+        // Sadece gerçek pozisyon çakışmasını kontrol et — virtual pozisyon gerçek alımı bloklamamalı
         var exists = await db.Positions
-            .AnyAsync(p => p.UserId == signal.UserId && p.CoinId == signal.CoinId && p.Status == PositionStatus.Open, ct);
+            .AnyAsync(p => p.UserId == signal.UserId && p.CoinId == signal.CoinId
+                && p.Status == PositionStatus.Open && !p.IsVirtual, ct);
         if (exists) return;
 
         var strategy = signal.StrategyId != Guid.Empty
@@ -319,6 +427,10 @@ public class AutoTradeService(
 
         var (slPriceReal, tpPriceReal, trailingPctReal) = ComputeStops(price, strategy, signal.IndicatorScores);
 
+        // Binance'den gelen gerçek coin miktarını kullan (komisyon mahsup edilmiş).
+        // Formül (valueUsdt/price) kullanmak yetersiz bakiye hatasına yol açar.
+        var actualQty = (order.FilledQuantity ?? 0) > 0 ? order.FilledQuantity!.Value : valueUsdt / price;
+
         db.Positions.Add(new Position
         {
             UserId = signal.UserId,
@@ -326,7 +438,7 @@ public class AutoTradeService(
             StrategyId = signal.StrategyId != Guid.Empty ? signal.StrategyId : null,
             EntryOrderId = order.Id,
             EntryPrice = price,
-            EntryQuantity = valueUsdt / price,
+            EntryQuantity = actualQty,
             EntryValueUsdt = valueUsdt,
             StopLossPrice = slPriceReal,
             TakeProfitPrice = tpPriceReal,
@@ -401,30 +513,29 @@ public class AutoTradeService(
     }
 
     private async Task<decimal> CalculateOrderSizeAsync(
-        Guid userId, UserRiskSettings? risk, bool isVolatileMode, decimal? volatilePosSizePct, CancellationToken ct)
+        Guid userId, UserRiskSettings? risk, UserStrategy? strategy, CancellationToken ct)
     {
         var usdtBalance = await binance.GetUsdtBalanceAsync(userId, ct);
 
         decimal size;
-        if (risk?.MaxPositionSizeUsdt.HasValue == true)
-        {
+        // Strateji ayarı, global RiskSettings'e göre önceliklidir
+        if (strategy?.MaxPositionSizeUsdt.HasValue == true)
+            size = strategy.MaxPositionSizeUsdt.Value;
+        else if (strategy?.MaxPositionSizePct.HasValue == true)
+            size = usdtBalance * strategy.MaxPositionSizePct.Value / 100m;
+        else if (risk?.MaxPositionSizeUsdt.HasValue == true)
             size = risk.MaxPositionSizeUsdt.Value;
-        }
         else if (risk?.MaxPositionSizePct.HasValue == true)
-        {
             size = usdtBalance * risk.MaxPositionSizePct.Value / 100m;
-        }
         else
-        {
-            // Varsayılan: anaparanın %20'si (max 5 eş zamanlı pozisyon = %100 kullanım)
+            // Varsayılan: bakiyenin %20'si (5 eş zamanlı pozisyon = %100 kullanım)
             size = usdtBalance * 0.20m;
-        }
 
         // Volatile modda kullanıcı tanımlı oran veya varsayılan %50 küçültme
-        if (isVolatileMode)
+        if (strategy?.IsVolatileMode == true)
         {
-            var pct = volatilePosSizePct.HasValue
-                ? volatilePosSizePct.Value / 100m
+            var pct = strategy.VolatilePositionSizePct.HasValue
+                ? strategy.VolatilePositionSizePct.Value / 100m
                 : 0.5m;
             size *= pct;
         }
@@ -510,6 +621,45 @@ public class AutoTradeService(
     {
         var coin = await db.Coins.FindAsync([coinId], ct);
         return coin?.Symbol;
+    }
+
+    private async Task DisableRealTradeAsync(UserStrategy? strategy, Guid userId, string symbol, string reason, CancellationToken ct)
+    {
+        if (strategy is not null && strategy.IsRealTradeEnabled)
+        {
+            strategy.IsRealTradeEnabled = false;
+            logger.LogWarning("Canlı al-sat devre dışı bırakıldı: {StratName} — {Reason}", strategy.Name, reason);
+        }
+
+        var body = $"Coin: {symbol}\nStrateji: {strategy?.Name ?? "—"}\nNeden: {reason}";
+        db.Notifications.Add(new Notification
+        {
+            UserId = userId,
+            Type = NotificationType.BinanceError,
+            Channel = NotificationChannel.InApp,
+            Title = "Canlı Al-Sat Durduruldu",
+            Body = body,
+        });
+
+        var risk = await db.UserRiskSettings.FirstOrDefaultAsync(r => r.UserId == userId, ct);
+        await SendTelegramAsync(userId, risk,
+            $"🚨 <b>Canlı Al-Sat Durduruldu</b>\n{body}", ct);
+
+        try
+        {
+            var user = await db.Users.FindAsync([userId], ct);
+            if (user?.Email != null)
+            {
+                var html = EmailTemplates.TradeError(user.FirstName, symbol, strategy?.Name ?? "—", reason);
+                await emailService.SendAsync(user.Email, "Canlı Al-Sat Durduruldu — Nexxbit", html, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Hata e-postası gönderilemedi: UserId={UserId}", userId);
+        }
+
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task SendTelegramAsync(Guid userId, UserRiskSettings? risk, string message, CancellationToken ct)

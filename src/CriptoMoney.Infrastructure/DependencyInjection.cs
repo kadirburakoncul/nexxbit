@@ -23,6 +23,15 @@ public static class DependencyInjection
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddSingleton<IBinanceStreamService, BinanceStreamService>();
 
+        // BIST — kripto trading motoruyla bağlantısı yok, sadece ücretsiz veri + sinyal
+        services.AddScoped<IBistDataService, BistDataService>();
+        services.AddHttpClient("yahoo-finance", c =>
+        {
+            c.Timeout = TimeSpan.FromSeconds(10);
+            c.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36");
+        });
+
         // İndikatörler — sadece Level1 (T3 tabanlı) aktif
         services.AddSingleton<IIndicator, Level1Indicator>();
         services.AddSingleton<IIndicator, RsiIndicator>();

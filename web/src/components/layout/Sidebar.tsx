@@ -1,11 +1,22 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, TrendingUp, LineChart, Bell, Settings,
   Wifi, FlaskConical, Shield, Users, CandlestickChart, Terminal,
-  BarChart3, Cpu, Sliders, ClipboardList, Radar, Flame
+  BarChart3, Cpu, Sliders, ClipboardList, Radar, Flame, BarChart2, PieChart
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+import { useMarketStore } from '@/stores/marketStore'
+
+const bistNavItems = [
+  { to: '/bist',             icon: LayoutDashboard, label: 'BIST Pano'    },
+  { to: '/bist/indicators',  icon: Cpu,             label: 'İndikatörler' },
+  { to: '/bist/strategies',  icon: Sliders,         label: 'Stratejiler'  },
+  { to: '/bist/signals',     icon: LineChart,        label: 'Sinyaller'    },
+  { to: '/bist/monitor',     icon: Radar,           label: 'Takip'        },
+  { to: '/bist/chart',       icon: CandlestickChart,label: 'Grafik'       },
+  { to: '/bist/stocks',      icon: BarChart2,       label: 'Hisseler'     },
+]
 
 const navItems = [
   { to: '/',           icon: LayoutDashboard, label: 'Dashboard'   },
@@ -19,6 +30,8 @@ const navItems = [
   { to: '/indicators', icon: Cpu,             label: 'İndikatörler'},
   { to: '/strategies', icon: Sliders,         label: 'Stratejiler' },
   { to: '/volatile',   icon: Flame,           label: 'Volatil Mod' },
+  { to: '/analysis',   icon: BarChart2,       label: 'Analiz'      },
+  { to: '/analytics',  icon: PieChart,        label: 'Performans'  },
   { to: '/notifications', icon: Bell,         label: 'Bildirimler' },
   { to: '/settings',   icon: Settings,        label: 'Ayarlar'     },
   { to: '/binance',    icon: Wifi,            label: 'Binance'     },
@@ -32,6 +45,16 @@ const adminItems = [
 
 export default function Sidebar() {
   const isAdmin = useAuthStore(s => s.isAdmin)()
+  const { market, setMarket } = useMarketStore()
+  const navigate = useNavigate()
+  const isBist = market === 'bist'
+
+  const switchMarket = (m: 'crypto' | 'bist') => {
+    setMarket(m)
+    navigate(m === 'bist' ? '/bist' : '/')
+  }
+
+  const activeNavItems = isBist ? bistNavItems : navItems
 
   return (
     <aside className="hidden md:flex md:flex-col w-56 shrink-0 bg-[#0f1117] border-r border-white/5 h-screen sticky top-0">
@@ -42,13 +65,33 @@ export default function Sidebar() {
         </span>
       </div>
 
+      {/* Market switcher */}
+      <div className="px-3 pt-3">
+        <div className="flex bg-white/5 rounded-xl p-1">
+          <button
+            onClick={() => switchMarket('crypto')}
+            className={cn('flex-1 text-center py-1.5 rounded-lg text-xs font-medium transition-colors',
+              !isBist ? 'bg-yellow-400 text-black' : 'text-slate-500 hover:text-slate-300')}
+          >
+            Kripto
+          </button>
+          <button
+            onClick={() => switchMarket('bist')}
+            className={cn('flex-1 text-center py-1.5 rounded-lg text-xs font-medium transition-colors',
+              isBist ? 'bg-yellow-400 text-black' : 'text-slate-500 hover:text-slate-300')}
+          >
+            BIST
+          </button>
+        </div>
+      </div>
+
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {activeNavItems.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
-            end={to === '/'}
+            end={to === '/' || to === '/bist'}
             className={({ isActive }) =>
               cn('flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
                 isActive
@@ -61,7 +104,7 @@ export default function Sidebar() {
           </NavLink>
         ))}
 
-        {isAdmin && (
+        {!isBist && isAdmin && (
           <>
             <div className="px-3 pt-4 pb-1 text-xs text-slate-600 uppercase tracking-wider">Admin</div>
             {adminItems.map(({ to, icon: Icon, label }) => (
@@ -86,7 +129,7 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-white/5 text-xs text-slate-600">
-        Withdrawal yetkisi kullanılmaz
+        {isBist ? 'BIST: sadece sinyal, al-sat yok' : 'Withdrawal yetkisi kullanılmaz'}
       </div>
     </aside>
   )

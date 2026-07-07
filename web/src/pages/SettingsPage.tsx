@@ -8,7 +8,7 @@ import { client } from '@/api/client'
 import { coinsApi } from '@/api/coins'
 import { binanceApi } from '@/api/binance'
 import { useState, useEffect } from 'react'
-import { ShieldX, ShieldCheck, X, Wifi, WifiOff, Bot, Gauge, Zap, Search, Check, ChevronDown, ChevronUp, Send, AlertTriangle, KeyRound, Sun, Moon, Globe } from 'lucide-react'
+import { ShieldX, ShieldCheck, X, Wifi, WifiOff, Gauge, Zap, Search, Check, ChevronDown, ChevronUp, Send, AlertTriangle, KeyRound, Sun, Moon, Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import { useThemeStore } from '@/stores/themeStore'
@@ -16,10 +16,16 @@ import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/stores/timezoneStore'
 
 interface RiskSettings {
   tradeMode: number
-  maxOrderUsdt: number
-  stopLossPct: number
-  takeProfitPct: number
+  isAutoTradeEnabled: boolean
+  maxDailyLossUsdt: number | null
+  maxDailyLossPct: number | null
   maxOpenPositions: number
+  maxPositionSizeUsdt: number | null
+  maxPositionSizePct: number | null
+  defaultStopLossPct: number | null
+  defaultTakeProfitPct: number | null
+  isStopLossRequired: boolean
+  closeOnDisconnect: boolean
   flashCrashProtectionEnabled: boolean
   flashCrashDropPct: number
   flashCrashWindowMinutes: number
@@ -31,11 +37,10 @@ interface RiskSettings {
 }
 
 const schema = z.object({
-  tradeMode: z.coerce.number(),
-  maxOrderUsdt: z.coerce.number().min(1),
-  stopLossPct: z.coerce.number().min(0.1).max(100),
-  takeProfitPct: z.coerce.number().min(0.1).max(100),
-  maxOpenPositions: z.coerce.number().int().min(1),
+  maxOpenPositions: z.coerce.number().int().min(1).max(50),
+  maxPositionSizeUsdt: z.coerce.number().min(1).nullable().optional(),
+  maxPositionSizePct: z.coerce.number().min(1).max(100).nullable().optional(),
+  maxDailyLossUsdt: z.coerce.number().min(0).nullable().optional(),
   flashCrashProtectionEnabled: z.boolean(),
   flashCrashDropPct: z.coerce.number().min(0.5).max(50),
   flashCrashWindowMinutes: z.coerce.number().int().min(1),
@@ -45,11 +50,6 @@ const schema = z.object({
 })
 type FormData = z.infer<typeof schema>
 
-const TRADE_MODES = [
-  { value: 0, label: 'Yalnızca Sinyal', desc: 'İşlem açılmaz, sinyal üretilir' },
-  { value: 1, label: 'Manuel Onay', desc: 'Her işlem onay bekler' },
-  { value: 2, label: 'Tam Otomatik', desc: 'Sinyaller otomatik işleme alınır' },
-]
 
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-yellow-400/50 focus:bg-white/8 transition-all'
 
@@ -92,7 +92,16 @@ export default function SettingsPage() {
   }, [data, reset])
 
   const save = useMutation({
-    mutationFn: (d: FormData) => client.put('/risksettings', d),
+    mutationFn: (d: FormData) => client.put('/risksettings', {
+      ...d,
+      tradeMode: data?.tradeMode ?? 2,
+      isAutoTradeEnabled: d.flashCrashProtectionEnabled,
+      maxDailyLossPct: data?.maxDailyLossPct ?? null,
+      defaultStopLossPct: data?.defaultStopLossPct ?? null,
+      defaultTakeProfitPct: data?.defaultTakeProfitPct ?? null,
+      isStopLossRequired: data?.isStopLossRequired ?? true,
+      closeOnDisconnect: data?.closeOnDisconnect ?? true,
+    }),
     onSuccess: () => {
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
@@ -168,66 +177,40 @@ export default function SettingsPage() {
 
         <form onSubmit={handleSubmit(d => save.mutate(d as any))} className="space-y-3">
 
-          {/* Trade Mode */}
-          <Section icon={<Bot size={15} />} title="İşlem Modu">
-            <div className="space-y-2">
-              {TRADE_MODES.map(m => {
-                const isSelected = Number(watch('tradeMode')) === m.value
-                return (
-                  <label key={m.value} className={cn(
-                    'flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all',
-                    isSelected
-                      ? 'bg-yellow-400/8 border-yellow-400/30'
-                      : 'bg-white/3 border-white/8 hover:border-white/15'
-                  )}>
-                    <input {...register('tradeMode')} type="radio" value={m.value} className="hidden" />
-                    <div className={cn(
-                      'w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors',
-                      isSelected ? 'border-yellow-400' : 'border-white/20'
-                    )}>
-                      {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-yellow-400" />}
-                    </div>
-                    <div className="flex-1">
-                      <p className={cn('text-sm font-medium', isSelected ? 'text-yellow-400' : 'text-slate-200')}>{m.label}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{m.desc}</p>
-                    </div>
-                    {isSelected && <Check size={14} className="text-yellow-400 shrink-0" />}
-                  </label>
-                )
-              })}
-            </div>
-          </Section>
-
           {/* Position Limits */}
           <Section icon={<Gauge size={15} />} title="Pozisyon Limitleri">
+            <p className="text-xs text-slate-500 -mt-1">Otomatik açılan gerçek işlemlerin boyutunu ve sayısını sınırlayan genel güvenlik ayarları.</p>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Maks. İşlem (USDT)" error={errors.maxOrderUsdt?.message}>
-                <input {...register('maxOrderUsdt')} type="number" step="1" className={inputCls} />
-              </Field>
-              <Field label="Maks. Açık Pozisyon" error={errors.maxOpenPositions?.message}>
+              <Field label="Maks. Açık Pozisyon" error={errors.maxOpenPositions?.message} hint="Aynı anda açık olabilecek gerçek pozisyon sayısının üst sınırı. Bu sayıya ulaşılınca yeni AL sinyalleri işleme alınmaz.">
                 <input {...register('maxOpenPositions')} type="number" min="1" className={inputCls} />
               </Field>
-              <Field label="Stop Loss %" error={errors.stopLossPct?.message}>
-                <input {...register('stopLossPct')} type="number" step="0.1" className={inputCls} />
+              <Field label="Maks. İşlem Tutarı (USDT)" error={errors.maxPositionSizeUsdt?.message} hint="Tek bir işlemde kullanılacak sabit USDT tutarı. Doldurursanız aşağıdaki yüzde alanı yoksayılır.">
+                <input {...register('maxPositionSizeUsdt', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })} type="number" step="1" placeholder="Boş = % kullan" className={inputCls} />
               </Field>
-              <Field label="Take Profit %" error={errors.takeProfitPct?.message}>
-                <input {...register('takeProfitPct')} type="number" step="0.1" className={inputCls} />
+              <Field label="Maks. İşlem Tutarı (% Bakiye)" error={errors.maxPositionSizePct?.message} hint="Her işlemde USDT bakiyenizin yüzde kaçının kullanılacağı. Tutar alanı boşsa bu kullanılır; ikisi de boşsa varsayılan %20 uygulanır.">
+                <input {...register('maxPositionSizePct', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })} type="number" step="1" placeholder="Ör: 20" className={inputCls} />
+              </Field>
+              <Field label="Günlük Maks. Zarar (USDT)" error={errors.maxDailyLossUsdt?.message} hint="Bir günde bu kadar USDT zarara ulaşılınca, o gün için yeni otomatik işlem açılmaz. Ertesi gün otomatik sıfırlanır.">
+                <input {...register('maxDailyLossUsdt', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })} type="number" step="1" placeholder="Boş = sınırsız" className={inputCls} />
               </Field>
             </div>
           </Section>
 
           {/* Flash Crash */}
           <Section icon={<Zap size={15} />} title="Flash Crash Koruması">
+            <p className="text-xs text-slate-500 -mt-1">
+              Bitcoin (BTC) fiyatını arka planda izler. BTC, belirlediğiniz süre içinde belirlediğiniz yüzdeden fazla aniden düşerse (ani çöküş / "flash crash"), sistem tüm otomatik işlemleri geçici olarak durdurur — piyasa panikteyken kötü fiyattan yeni pozisyon açılmasını önler. Piyasa toparlanıp düşüş yarıya inince otomatik işlemler kendiliğinden devam eder.
+            </p>
             <Toggle
               register={register('flashCrashProtectionEnabled')}
               label="Korumayı Etkinleştir"
             />
             {flashOn && (
               <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-white/5">
-                <Field label="Düşüş Eşiği %" error={errors.flashCrashDropPct?.message}>
+                <Field label="Düşüş Eşiği %" error={errors.flashCrashDropPct?.message} hint="BTC bu yüzdeden fazla düşerse koruma devreye girer. Örn: 5 → BTC %5 düşünce otomatik işlemler durur.">
                   <input {...register('flashCrashDropPct')} type="number" step="0.5" className={inputCls} />
                 </Field>
-                <Field label="Zaman Penceresi (dk)" error={errors.flashCrashWindowMinutes?.message}>
+                <Field label="Zaman Penceresi (dk)" error={errors.flashCrashWindowMinutes?.message} hint="Düşüş bu kaç dakika içinde gerçekleşirse 'ani çöküş' sayılır. Örn: 15 → son 15 dakikadaki düşüş ölçülür.">
                   <input {...register('flashCrashWindowMinutes')} type="number" min="1" className={inputCls} />
                 </Field>
               </div>
@@ -236,6 +219,9 @@ export default function SettingsPage() {
 
           {/* Telegram */}
           <Section icon={<Send size={15} />} title="Telegram Bildirimleri">
+            <p className="text-xs text-slate-500 -mt-1">
+              Açık olduğunda; AL/SAT işlemleri, pozisyon kapanışları ve Flash Crash uyarıları gibi önemli olaylar Telegram'a anlık mesaj olarak gönderilir.
+            </p>
             <Toggle
               register={register('telegramEnabled')}
               label="Bildirimleri Etkinleştir"
@@ -243,10 +229,10 @@ export default function SettingsPage() {
             {telegramOn && (
               <div className="space-y-3 mt-3 pt-3 border-t border-white/5">
                 <div className="grid grid-cols-1 gap-3">
-                  <Field label="Bot Token">
+                  <Field label="Bot Token" hint="Telegram'da @BotFather ile oluşturduğunuz botun erişim anahtarı.">
                     <input {...register('telegramBotToken')} type="text" placeholder="123456789:AAHdqTcv…" className={inputCls} />
                   </Field>
-                  <Field label="Chat ID">
+                  <Field label="Chat ID" hint="Mesajların gönderileceği sohbet/grup kimliği. Botu eklediğiniz sohbetten @userinfobot gibi bir araçla öğrenebilirsiniz.">
                     <input {...register('telegramChatId')} type="text" placeholder="-1001234567890" className={inputCls} />
                   </Field>
                 </div>
@@ -318,6 +304,9 @@ export default function SettingsPage() {
 
           {coinListOpen && (
             <div className="px-5 pb-5 space-y-4 border-t border-white/5">
+              <p className="text-xs text-slate-500 pt-3">
+                <span className="text-emerald-400 font-medium">İzin Verilenler</span> listesi doluysa sistem SADECE o coinlerde işlem üretir (beyaz liste). <span className="text-red-400 font-medium">Engellenenler</span> listesindeki coinler ise hangi stratejide olursa olsun asla işleme alınmaz (kara liste) — iki liste birbirinden bağımsız çalışır.
+              </p>
               {/* Search */}
               <div className="relative mt-3">
                 <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
@@ -475,11 +464,12 @@ function Section({ icon, title, children }: {
   )
 }
 
-function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+function Field({ label, error, hint, children }: { label: string; error?: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
       <label className="block text-xs font-medium text-slate-400 mb-1.5">{label}</label>
       {children}
+      {hint && !error && <p className="text-[11px] text-slate-600 mt-1 leading-snug">{hint}</p>}
       {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
     </div>
   )

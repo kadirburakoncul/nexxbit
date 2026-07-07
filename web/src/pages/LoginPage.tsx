@@ -39,7 +39,7 @@ export default function LoginPage() {
         setOtpStep(true)
       } else {
         setTokens(res.accessToken!, res.refreshToken!)
-        navigate('/', { replace: true })
+        navigate('/market-select', { replace: true })
       }
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { errors?: string[] } } })?.response?.data?.errors?.[0]
@@ -55,7 +55,7 @@ export default function LoginPage() {
     try {
       const res = await client.post('/auth/verify-login-otp', { email: otpEmail, otp })
       setTokens(res.data.accessToken, res.data.refreshToken)
-      navigate('/', { replace: true })
+      navigate('/market-select', { replace: true })
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { errors?: string[] } } })?.response?.data?.errors?.[0]
       setError(msg ?? 'Doğrulama kodu hatalı.')

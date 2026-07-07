@@ -11,6 +11,7 @@ public class User : SoftDeleteEntity
     public string LastName { get; set; } = string.Empty;
     public UserRole Role { get; set; } = UserRole.User;
     public bool IsEmailVerified { get; set; } = false;
+    public bool IsApprovedByAdmin { get; set; } = false;
     public bool SkipLoginOtp { get; set; } = false;
     public string? LoginOtpCode { get; set; }
     public DateTime? LoginOtpExpiry { get; set; }

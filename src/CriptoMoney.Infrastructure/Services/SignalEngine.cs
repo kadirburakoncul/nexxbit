@@ -113,11 +113,24 @@ public class SignalEngine(
         var src  = candles.Select(c => (c.High + c.Low + 2m * c.Close) / 4m).ToArray();
         var t3   = TillsonIndicator.ComputeT3(src, t3Period, t3Factor);
 
-        // 2-bar konfirmasyon: dönüş [^3]'te başladı, [^2] onayladı, [^4]>[^5] eski yön
+        // Normal mod: 2-bar reversal konfirmasyonu (T3 önce aşağıdayken yukarı döner)
         // BUY:  [^4]↓→[^3]↑ (dönüş bar) + [^2]↑ (onay bar)
         // SELL: [^4]↑→[^3]↓ (dönüş bar) + [^2]↓ (onay bar)
-        var t3TurnUp   = t3[^3] > t3[^4] && !(t3[^4] > t3[^5]) && t3[^2] > t3[^3];
-        var t3TurnDown = !(t3[^3] > t3[^4]) && t3[^4] > t3[^5]  && !(t3[^2] > t3[^3]);
+        //
+        // Volatile mod: Momentuma giren coinler zaten YUKARI trendde olur → reversal beklemek
+        // anlamsız. Bunun yerine: T3'ün 2 ardışık bar boyunca YUKARı gitmesi yeterli (trend takibi).
+        // Çıkış: CloseDroppedMomentumPositions (coin listeden düşünce kapat) VEYA T3 aşağı dönünce.
+        bool t3TurnUp, t3TurnDown;
+        if (strategy.IsVolatileMode)
+        {
+            t3TurnUp   = t3[^2] > t3[^3];    // 1-bar: son bar T3 yukarı → daha erken giriş
+            t3TurnDown = !(t3[^2] > t3[^3]); // 1-bar: son bar T3 düştü → çıkış
+        }
+        else
+        {
+            t3TurnUp   = t3[^3] > t3[^4] && !(t3[^4] > t3[^5]) && t3[^2] > t3[^3];
+            t3TurnDown = !(t3[^3] > t3[^4]) && t3[^4] > t3[^5]  && !(t3[^2] > t3[^3]);
+        }
 
         var lastCandle = candles[^2]; // son kapanmış mum (onay bar)
         var closePrice = lastCandle.Close;
@@ -150,7 +163,10 @@ public class SignalEngine(
         {
             if (strategyCoin is not null)
             {
-                strategyCoin.LastCheckedReason = $"T3 {(t3[^2] > t3[^3] ? "yükseliyor" : "düşüyor")} — 2-bar konfirmasyon yok";
+                var t3Dir = t3[^2] > t3[^3] ? "yükseliyor" : "düşüyor";
+                strategyCoin.LastCheckedReason = strategy.IsVolatileMode
+                    ? $"T3 {t3Dir} — volatile: 2-bar {t3Dir} yok"
+                    : $"T3 {t3Dir} — 2-bar konfirmasyon yok";
                 await db.SaveChangesAsync(ct);
             }
             return null;
@@ -310,6 +326,42 @@ public class SignalEngine(
             }
         }
 
+        // ADX filtresi — trend gücü (sadece BUY sinyalinde)
+        decimal? adxValue = null;
+        if (dir == SignalDirection.Buy && strategy.UseAdxFilter)
+        {
+            adxValue = Indicators.TechnicalUtils.ComputeAdx(candles, strategy.AdxPeriod > 0 ? strategy.AdxPeriod : 14);
+            if (adxValue < strategy.AdxMinValue)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason = $"T3 yukarı döndü ama ADX {adxValue:F1} < {strategy.AdxMinValue:F1} — trend zayıf, AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("ADX filtresi AL bloklandı: CoinId={Id} ADX={ADX:F1}", coinId, adxValue);
+                return null;
+            }
+        }
+
+        // MACD filtresi — bullish momentum (sadece BUY sinyalinde)
+        decimal? macdHistogram = null;
+        if (dir == SignalDirection.Buy && strategy.UseMacdFilter)
+        {
+            var closes2 = candles.Select(c => c.Close).ToArray();
+            var (_, _, histogram) = Indicators.TechnicalUtils.ComputeMacd(closes2);
+            macdHistogram = histogram;
+            if (histogram <= 0)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason = $"T3 yukarı döndü ama MACD histogram {histogram:F6} ≤ 0 — momentum yok, AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("MACD filtresi AL bloklandı: CoinId={Id} histogram={H:F6}", coinId, histogram);
+                return null;
+            }
+        }
+
         // ATR değerini signal'e göm — AutoTradeService ATR tabanlı SL/TP için kullanır
         var atr = Indicators.TechnicalUtils.ComputeAtr(candles, strategy.AtrPeriod > 0 ? strategy.AtrPeriod : 14);
 
@@ -320,7 +372,9 @@ public class SignalEngine(
             ["T3TurnDown"] = t3TurnDown ? 1 : 0,
             ["ATR"]        = atr,
         };
-        if (rsiValue.HasValue) scores["RSI"] = rsiValue.Value;
+        if (rsiValue.HasValue)    scores["RSI"]  = rsiValue.Value;
+        if (adxValue.HasValue)    scores["ADX"]  = adxValue.Value;
+        if (macdHistogram.HasValue) scores["MACDHist"] = macdHistogram.Value;
 
         logger.LogInformation("T3 Easy sinyali: Coin={CoinId} {Dir} (T3={T3:F6} close={C:F6})",
             coinId, dir, t3[^1], closePrice);
@@ -485,6 +539,41 @@ public class SignalEngine(
             return null;
         }
 
+        // ADX filtresi — trend gücü (sadece BUY sinyalinde)
+        decimal? adxEma = null;
+        if (dir == SignalDirection.Buy && strategy.UseAdxFilter)
+        {
+            adxEma = Indicators.TechnicalUtils.ComputeAdx(candles, strategy.AdxPeriod > 0 ? strategy.AdxPeriod : 14);
+            if (adxEma < strategy.AdxMinValue)
+            {
+                if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason = $"T3+EMA200 AL var ama ADX {adxEma:F1} < {strategy.AdxMinValue:F1} — trend zayıf, bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("ADX filtresi (T3+EMA200) AL bloklandı: CoinId={Id} ADX={ADX:F1}", coinId, adxEma);
+                return null;
+            }
+        }
+
+        // MACD filtresi — bullish momentum (sadece BUY sinyalinde)
+        decimal? macdHistEma = null;
+        if (dir == SignalDirection.Buy && strategy.UseMacdFilter)
+        {
+            var (_, _, histEma) = Indicators.TechnicalUtils.ComputeMacd(closes);
+            macdHistEma = histEma;
+            if (histEma <= 0)
+            {
+                if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason = $"T3+EMA200 AL var ama MACD histogram {histEma:F6} ≤ 0 — momentum yok, bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("MACD filtresi (T3+EMA200) AL bloklandı: CoinId={Id} histogram={H:F6}", coinId, histEma);
+                return null;
+            }
+        }
+
         var atrEma = Indicators.TechnicalUtils.ComputeAtr(candles, strategy.AtrPeriod > 0 ? strategy.AtrPeriod : 14);
         var scores = new Dictionary<string, decimal>
         {
@@ -494,6 +583,8 @@ public class SignalEngine(
             ["T3TurnDown"] = t3TurnDown ? 1 : 0,
             ["ATR"]        = atrEma,
         };
+        if (adxEma.HasValue)    scores["ADX"]      = adxEma.Value;
+        if (macdHistEma.HasValue) scores["MACDHist"] = macdHistEma.Value;
 
         logger.LogInformation("T3+EMA200 sinyali: {Symbol} {Dir} (T3={T3:F4} EMA={EMA:F4} close={C:F4})",
             strategy.Coin?.Symbol ?? coinId.ToString(), dir, t3[^1], ema200Last, closePrice);

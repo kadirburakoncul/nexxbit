@@ -23,6 +23,8 @@ export default function AppLayout() {
         qc.invalidateQueries({ queryKey: ['positions'] })
         qc.invalidateQueries({ queryKey: ['signals'] })
         qc.invalidateQueries({ queryKey: ['stats'] })
+        qc.invalidateQueries({ queryKey: ['strategy-monitor'] })
+        qc.invalidateQueries({ queryKey: ['virtual-positions'] })
       },
     },
     enabled: !!accessToken,

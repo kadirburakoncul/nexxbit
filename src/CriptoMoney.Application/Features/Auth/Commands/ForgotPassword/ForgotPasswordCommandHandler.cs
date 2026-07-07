@@ -1,6 +1,7 @@
 using CriptoMoney.Application.Common.Email;
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Common.Models;
+using CriptoMoney.Application.Common.Security;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -22,7 +23,7 @@ public class ForgotPasswordCommandHandler(
             return Result.Success();
 
         var resetToken = Guid.NewGuid().ToString("N");
-        user.PasswordResetToken = resetToken;
+        user.PasswordResetToken = TokenHasher.Hash(resetToken); // DB'de hash tutulur, ham token sadece e-postaya gider
         user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
         await db.SaveChangesAsync(cancellationToken);
 

@@ -51,4 +51,91 @@ public static class TechnicalUtils
             ema[i] = values[i] * k + ema[i - 1] * (1 - k);
         return ema;
     }
+
+    /// <summary>
+    /// Wilder ADX — Average Directional Index.
+    /// Returns last ADX value (0–100). Values above 25 indicate trending market.
+    /// </summary>
+    public static decimal ComputeAdx(IReadOnlyList<CandleInput> candles, int period = 14)
+    {
+        int n = candles.Count;
+        if (n < period * 2 + 2) return 0m;
+
+        var plusDm  = new decimal[n];
+        var minusDm = new decimal[n];
+        var tr      = new decimal[n];
+
+        for (int i = 1; i < n; i++)
+        {
+            var upMove   = candles[i].High - candles[i - 1].High;
+            var downMove = candles[i - 1].Low - candles[i].Low;
+            plusDm[i]  = upMove   > downMove && upMove   > 0 ? upMove   : 0;
+            minusDm[i] = downMove > upMove   && downMove > 0 ? downMove : 0;
+
+            var hl  = candles[i].High - candles[i].Low;
+            var hpc = Math.Abs(candles[i].High - candles[i - 1].Close);
+            var lpc = Math.Abs(candles[i].Low  - candles[i - 1].Close);
+            tr[i] = Math.Max(hl, Math.Max(hpc, lpc));
+        }
+
+        // Wilder smoothing seed (ilk period bar)
+        decimal trSmooth = 0, plusSmooth = 0, minusSmooth = 0;
+        for (int i = 1; i <= period; i++)
+        {
+            trSmooth    += tr[i];
+            plusSmooth  += plusDm[i];
+            minusSmooth += minusDm[i];
+        }
+
+        var adxSmooth = 0m;
+        decimal? prevAdx = null;
+
+        for (int i = period + 1; i < n; i++)
+        {
+            trSmooth    = trSmooth    - trSmooth    / period + tr[i];
+            plusSmooth  = plusSmooth  - plusSmooth  / period + plusDm[i];
+            minusSmooth = minusSmooth - minusSmooth / period + minusDm[i];
+
+            var plusDi  = trSmooth > 0 ? plusSmooth  / trSmooth * 100m : 0;
+            var minusDi = trSmooth > 0 ? minusSmooth / trSmooth * 100m : 0;
+            var dx = (plusDi + minusDi) > 0 ? Math.Abs(plusDi - minusDi) / (plusDi + minusDi) * 100m : 0;
+
+            if (prevAdx is null)
+            {
+                adxSmooth = dx;
+            }
+            else
+            {
+                adxSmooth = (adxSmooth * (period - 1) + dx) / period;
+            }
+            prevAdx = adxSmooth;
+        }
+
+        return Math.Round(adxSmooth, 4);
+    }
+
+    /// <summary>
+    /// MACD — Moving Average Convergence Divergence.
+    /// Returns (macdLine, signalLine, histogram) for the last bar.
+    /// Bullish when macd > signal (histogram > 0).
+    /// </summary>
+    public static (decimal macd, decimal signal, decimal histogram) ComputeMacd(
+        decimal[] closes, int fast = 12, int slow = 26, int signalPeriod = 9)
+    {
+        if (closes.Length < slow + signalPeriod) return (0, 0, 0);
+
+        var emaFast   = ComputeEma(closes, fast);
+        var emaSlow   = ComputeEma(closes, slow);
+        var macdLine  = new decimal[closes.Length];
+        for (int i = slow - 1; i < closes.Length; i++)
+            macdLine[i] = emaFast[i] - emaSlow[i];
+
+        // Signal = EMA(macdLine, signalPeriod)
+        var macdSlice = macdLine.Skip(slow - 1).ToArray();
+        var signalArr = ComputeEma(macdSlice, signalPeriod);
+
+        var lastMacd   = macdLine[^1];
+        var lastSignal = signalArr[^1];
+        return (lastMacd, lastSignal, lastMacd - lastSignal);
+    }
 }

@@ -58,6 +58,20 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
             existing.IsVolumeSurgeFilterEnabled = request.IsVolumeSurgeFilterEnabled;
             existing.VolumeSurgeMultiplier = request.VolumeSurgeMultiplier;
             existing.UseMarketRegimeFilter = request.UseMarketRegimeFilter;
+            existing.MaxHoldHours = request.MaxHoldHours;
+            existing.SlCooldownHours = request.SlCooldownHours;
+            existing.IsGreenCandleFilterEnabled = request.IsGreenCandleFilterEnabled;
+            existing.IsEma200RuleEnabled = request.IsEma200RuleEnabled;
+            existing.MaxOpenPositions = request.MaxOpenPositions;
+            existing.MaxPositionSizeUsdt = request.MaxPositionSizeUsdt;
+            existing.MaxPositionSizePct = request.MaxPositionSizePct;
+            existing.MinPositionSizeUsdt = request.MinPositionSizeUsdt;
+            existing.UseAdxFilter = request.UseAdxFilter;
+            existing.AdxPeriod = request.AdxPeriod;
+            existing.AdxMinValue = request.AdxMinValue;
+            existing.UseMacdFilter = request.UseMacdFilter;
+            existing.UseBreakevenStop = request.UseBreakevenStop;
+            existing.BreakevenTriggerPct = request.BreakevenTriggerPct;
 
             // Coin listesini güncelle — yeniden gelmeyenleri kaldır, yenileri ekle
             var existingCoinIds = existing.StrategyCoins.Select(sc => sc.CoinId).ToHashSet();
@@ -98,6 +112,20 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
                 IsVolumeSurgeFilterEnabled = request.IsVolumeSurgeFilterEnabled,
                 VolumeSurgeMultiplier = request.VolumeSurgeMultiplier,
                 UseMarketRegimeFilter = request.UseMarketRegimeFilter,
+                MaxHoldHours = request.MaxHoldHours,
+                SlCooldownHours = request.SlCooldownHours,
+                IsGreenCandleFilterEnabled = request.IsGreenCandleFilterEnabled,
+                IsEma200RuleEnabled = request.IsEma200RuleEnabled,
+                MaxOpenPositions = request.MaxOpenPositions,
+                MaxPositionSizeUsdt = request.MaxPositionSizeUsdt,
+                MaxPositionSizePct = request.MaxPositionSizePct,
+                MinPositionSizeUsdt = request.MinPositionSizeUsdt,
+                UseAdxFilter = request.UseAdxFilter,
+                AdxPeriod = request.AdxPeriod,
+                AdxMinValue = request.AdxMinValue,
+                UseMacdFilter = request.UseMacdFilter,
+                UseBreakevenStop = request.UseBreakevenStop,
+                BreakevenTriggerPct = request.BreakevenTriggerPct,
                 IsActive = true,
             };
             db.UserStrategies.Add(strategy);

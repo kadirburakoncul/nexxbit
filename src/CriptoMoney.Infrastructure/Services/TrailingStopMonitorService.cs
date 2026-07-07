@@ -87,12 +87,32 @@ public class TrailingStopMonitorService(
         // Fix 9: Race condition — başka thread kapattıysa atla
         if (position.Status != PositionStatus.Open) return;
 
-        // High watermark güncelle
+        // High watermark + peak price güncelle
+        bool changed = false;
         if (position.TrailingStopHighWatermark is null || currentPrice > position.TrailingStopHighWatermark)
         {
             position.TrailingStopHighWatermark = currentPrice;
-            await db.SaveChangesAsync(ct);
+            changed = true;
         }
+        if (position.PeakPrice is null || currentPrice > position.PeakPrice)
+        {
+            position.PeakPrice = currentPrice;
+            position.PeakPriceAt = DateTime.UtcNow;
+            position.PeakPnlPct = position.EntryPrice > 0
+                ? Math.Round((currentPrice - position.EntryPrice) / position.EntryPrice * 100m, 4)
+                : null;
+            changed = true;
+        }
+        if (position.TroughPrice is null || currentPrice < position.TroughPrice)
+        {
+            position.TroughPrice = currentPrice;
+            position.TroughPriceAt = DateTime.UtcNow;
+            position.TroughPnlPct = position.EntryPrice > 0
+                ? Math.Round((currentPrice - position.EntryPrice) / position.EntryPrice * 100m, 4)
+                : null;
+            changed = true;
+        }
+        if (changed) await db.SaveChangesAsync(ct);
 
         var peak  = position.TrailingStopHighWatermark!.Value;
         var entry = position.EntryPrice;
@@ -102,11 +122,28 @@ public class TrailingStopMonitorService(
 
         var strategy = strategyCoin?.UserStrategy;
 
-        var trailingPct  = position.TrailingStopPct ?? strategy?.TrailingStopPct ?? 2.5m;
-        var stopLossPct  = strategy?.StopLossPct ?? 1.5m;
+        // Volatile mod: coin UserStrategyCoins'te yok, StrategyId üzerinden doğrudan çek
+        if (strategy is null && position.StrategyId.HasValue)
+            strategy = await db.UserStrategies
+                .FirstOrDefaultAsync(s => s.Id == position.StrategyId.Value, ct);
+
+        var trailingPct  = position.TrailingStopPct ?? strategy?.TrailingStopPct ?? 5.0m;
 
         var trailingTrigger = peak  * (1 - trailingPct / 100m);
-        var stopLossTrigger = entry * (1 - stopLossPct / 100m);
+        // Position'daki SL fiyatını kullan; yoksa strategy %'sinden hesapla
+        var stopLossTrigger = position.StopLossPrice
+            ?? entry * (1 - (strategy?.StopLossPct ?? 3.0m) / 100m);
+
+        // B: Maksimum tutma süresi — strateji ayarından alınır (varsayılan 8sa)
+        var maxHoldHours = strategy?.MaxHoldHours ?? 8;
+        var hoursOpen = (DateTime.UtcNow - position.OpenedAt).TotalHours;
+        if (hoursOpen >= maxHoldHours)
+        {
+            logger.LogWarning("Maks tutma süresi ({Max}sa) doldu: {Symbol} {Hours:F1}sa açık — zorla kapatılıyor",
+                maxHoldHours, position.Coin.Symbol, hoursOpen);
+            await ClosePositionAsync(db, binance, position, strategyCoin, currentPrice, ExitReason.MaxHoldTime, ct);
+            return;
+        }
 
         // Fix 7: Partial TP — ilk hedefte kısmen kapat
         if (!position.IsPartialTpHit && strategy?.PartialTpPct.HasValue == true)
@@ -119,12 +156,35 @@ public class TrailingStopMonitorService(
             }
         }
 
+        // Breakeven stop — kâr eşiğine ulaşıldıysa SL'yi giriş fiyatına taşı
+        if (strategy?.UseBreakevenStop == true
+            && (position.StopLossPrice == null || position.StopLossPrice < entry))
+        {
+            var currentPnlPct = entry > 0 ? (currentPrice - entry) / entry * 100m : 0m;
+            if (currentPnlPct >= strategy.BreakevenTriggerPct)
+            {
+                position.StopLossPrice = entry;
+                stopLossTrigger = entry;
+                await db.SaveChangesAsync(ct);
+                logger.LogInformation("Breakeven stop aktif: {Symbol} SL → giriş={Entry:F6} ({Pct:F2}% kârdayken)",
+                    position.Coin.Symbol, entry, currentPnlPct);
+            }
+        }
+
         // Normal exit koşulları
         ExitReason? exitReason = null;
         if (position.TakeProfitPrice.HasValue && currentPrice >= position.TakeProfitPrice.Value)
             exitReason = ExitReason.TakeProfit;
-        else if (currentPrice <= trailingTrigger) exitReason = ExitReason.TrailingStop;
-        else if (currentPrice <= stopLossTrigger) exitReason = ExitReason.StopLoss;
+        else if (currentPrice <= stopLossTrigger)
+            exitReason = ExitReason.StopLoss;
+        else
+        {
+            // C: Trailing stop her zaman aktif — partial TP bekleme kaldırıldı.
+            // Erken düşüşlerde SL önce tetiklenir (SL trigger > trailing trigger olduğu durumlarda).
+            // Coin yükseldikçe peak artar, trailing stop peak'i takip eder.
+            if (currentPrice <= trailingTrigger)
+                exitReason = ExitReason.TrailingStop;
+        }
 
         if (exitReason is null) return;
 
@@ -143,39 +203,56 @@ public class TrailingStopMonitorService(
         decimal currentPrice,
         CancellationToken ct)
     {
-        var closePct = strategy.PartialTpClosePct > 0 ? strategy.PartialTpClosePct : 50m;
-
-        position.IsPartialTpHit = true;
-        position.PartialTpHitPrice = currentPrice;
-
-        // Kısmi P&L: girişten şimdiye kadar olan kazanç × kapanan oran
+        var closePct    = strategy.PartialTpClosePct > 0 ? strategy.PartialTpClosePct : 50m;
         var grossPnlPct = (currentPrice - position.EntryPrice) / position.EntryPrice * 100m;
-        position.PartialRealizedPnlPct = Math.Round(grossPnlPct * closePct / 100m, 4);
 
         if (!position.IsVirtual && position.EntryQuantity > 0)
         {
-            // Gerçek pozisyon: kısmi sat
+            // Gerçek pozisyon: ÖNCE sat, SONRA state güncelle.
             var sellQty = Math.Floor(position.EntryQuantity * (closePct / 100m) * 100_000_000m) / 100_000_000m;
             if (sellQty > 0)
             {
                 var sellResult = await binance.PlaceMarketOrderAsync(
                     position.UserId, position.Coin.Symbol, OrderSide.Sell, sellQty, ct);
-                if (sellResult.Succeeded)
+                if (sellResult.Succeeded && sellResult.Data is not null)
                 {
+                    var receivedUsdt = sellResult.Data.CummulativeQuoteQty;
                     position.EntryQuantity  -= sellQty;
-                    position.EntryValueUsdt *= (1m - closePct / 100m);
-                    logger.LogInformation("Partial TP ({Pct}%): {Symbol} {Qty} coin satıldı @ {Price:F6}",
-                        closePct, position.Coin.Symbol, sellQty, currentPrice);
+                    // Orijinal maliyetin kapanan yüzdesi kadar düş (proceeds değil maliyet bazlı)
+                    position.EntryValueUsdt = Math.Round(position.EntryValueUsdt * (1m - closePct / 100m), 4);
+
+                    position.IsPartialTpHit      = true;
+                    position.PartialTpHitPrice   = currentPrice;
+                    position.PartialRealizedPnlPct = Math.Round(grossPnlPct * closePct / 100m, 4);
+                    position.TrailingStopHighWatermark = currentPrice;
+                    position.TrailingStopPct = 1.0m; // Kısmi TP sonrası trailing daralt: %1
+
+                    logger.LogInformation("Partial TP ({Pct}%): {Symbol} {Qty} coin → {USDT} USDT @ {Price:F6}",
+                        closePct, position.Coin.Symbol, sellQty, receivedUsdt, currentPrice);
+                }
+                else
+                {
+                    logger.LogError("Partial TP SELL BAŞARISIZ: {Symbol} {Error}",
+                        position.Coin.Symbol, sellResult.Errors.FirstOrDefault());
+                    // State güncelleme yok — bir sonraki döngüde yeniden denenecek
                 }
             }
         }
-
-        // Trailing stop'u partial TP fiyatına sıfırla (HWM artık bu fiyat)
-        position.TrailingStopHighWatermark = currentPrice;
+        else
+        {
+            // Sanal pozisyon: sadece state güncelle
+            position.IsPartialTpHit      = true;
+            position.PartialTpHitPrice   = currentPrice;
+            position.PartialRealizedPnlPct = Math.Round(grossPnlPct * closePct / 100m, 4);
+            position.TrailingStopHighWatermark = currentPrice;
+            position.TrailingStopPct = 1.0m; // Kısmi TP sonrası trailing daralt: %1
+            logger.LogInformation("Sanal Partial TP: {Symbol} @ {Price:F6} PartialPnl%={P:F2}",
+                position.Coin.Symbol, currentPrice, position.PartialRealizedPnlPct);
+        }
 
         await db.SaveChangesAsync(ct);
-        logger.LogInformation("Partial TP tetiklendi: {Symbol} @ {Price:F6} PartialPnl%={P:F2}",
-            position.Coin.Symbol, currentPrice, position.PartialRealizedPnlPct);
+        logger.LogInformation("Partial TP işlendi: {Symbol} @ {Price:F6}",
+            position.Coin.Symbol, currentPrice);
     }
 
     private async Task ClosePositionAsync(
@@ -193,24 +270,42 @@ public class TrailingStopMonitorService(
         var entry = position.EntryPrice;
         var peak  = position.TrailingStopHighWatermark ?? entry;
 
-        position.Status    = PositionStatus.Closed;
-        position.ClosePrice = currentPrice;
-        position.ClosedAt  = DateTime.UtcNow;
-        position.CloseReason = exitReason.ToString();
-        position.RealizedPnlPct = Math.Round((currentPrice - entry) / entry * 100m, 4);
-
         if (position.IsVirtual)
         {
+            position.Status         = PositionStatus.Closed;
+            position.ClosePrice     = currentPrice;
+            position.ClosedAt       = DateTime.UtcNow;
+            position.CloseReason    = exitReason.ToString();
+            position.RealizedPnlPct = Math.Round((currentPrice - entry) / entry * 100m, 4);
+            // USDT tutarlarını da hesapla (istatistik ve raporlama için)
+            position.CloseValueUsdt = position.EntryValueUsdt > 0
+                ? Math.Round(position.EntryValueUsdt * (1m + position.RealizedPnlPct.Value / 100m), 4)
+                : Math.Round(currentPrice * position.EntryQuantity, 4);
+            position.RealizedPnl = Math.Round(
+                (position.CloseValueUsdt ?? 0m) - position.EntryValueUsdt, 4);
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("Sanal pozisyon kapatıldı ({Reason}): {Symbol} PnL%={Pnl:F4}",
-                exitReason, position.Coin.Symbol, position.RealizedPnlPct);
+            logger.LogInformation(
+                "Sanal pozisyon kapatıldı ({Reason}): {Symbol} PnL%={Pnl:F4} PnL$={PnlUsdt:F2}",
+                exitReason, position.Coin.Symbol, position.RealizedPnlPct, position.RealizedPnl);
             return;
         }
 
         var riskSettings = await db.UserRiskSettings
             .FirstOrDefaultAsync(r => r.UserId == position.UserId, ct);
 
-        // Gerçek pozisyon: Binance'e SELL emri
+        // Gerçek pozisyon: kapatmadan önce DB'den taze durum kontrolü (race condition — başka servis kapattıysa atla)
+        var freshStatus = await db.Positions
+            .Where(p => p.Id == position.Id)
+            .Select(p => p.Status)
+            .FirstOrDefaultAsync(ct);
+        if (freshStatus != PositionStatus.Open)
+        {
+            logger.LogDebug("Gerçek pozisyon zaten kapatılmış (double-close engellendi): PositionId={Id}", position.Id);
+            return;
+        }
+
+        // Binance'e SELL emri — ÖNCE sat, SONRA kapat.
+        // SAT başarısız olursa pozisyonu açık bırak; coin cüzdanda kalır ve izleme devam eder.
         var coinQty = position.EntryQuantity;
         if (coinQty > 0)
         {
@@ -221,13 +316,17 @@ public class TrailingStopMonitorService(
             if (sellResult.Succeeded && sellResult.Data is not null)
             {
                 var receivedUsdt = sellResult.Data.CummulativeQuoteQty;
+
+                position.Status      = PositionStatus.Closed;
+                position.ClosePrice  = currentPrice;
+                position.ClosedAt    = DateTime.UtcNow;
+                position.CloseReason = exitReason.ToString();
                 position.CloseValueUsdt = receivedUsdt;
                 position.RealizedPnl = Math.Round(receivedUsdt - position.EntryValueUsdt, 4);
                 position.RealizedPnlPct = position.EntryValueUsdt > 0
                     ? Math.Round((receivedUsdt - position.EntryValueUsdt) / position.EntryValueUsdt * 100m, 4)
                     : 0;
 
-                // Fix 2: Günlük kayıp takibi güncelle
                 if (position.RealizedPnl < 0 && riskSettings != null)
                 {
                     ResetDailyLossIfNeeded(riskSettings);
@@ -239,14 +338,23 @@ public class TrailingStopMonitorService(
             }
             else
             {
-                logger.LogError("{Reason} SELL BAŞARISIZ: {Symbol} {Error}",
+                // SAT başarısız — pozisyonu AÇIK bırak, bir sonraki döngüde tekrar denenecek.
+                logger.LogError("{Reason} SELL BAŞARISIZ (pozisyon açık kalıyor, yeniden denenecek): {Symbol} {Error}",
                     exitReason, position.Coin.Symbol, sellResult.Errors.FirstOrDefault());
+                await db.SaveChangesAsync(ct); // sadece HWM güncellemelerini kaydet
+                return;
             }
         }
         else
         {
+            // Coin miktarı 0 — fiyat bazlı P&L hesapla (sanal benzeri durum)
+            position.Status      = PositionStatus.Closed;
+            position.ClosePrice  = currentPrice;
+            position.ClosedAt    = DateTime.UtcNow;
+            position.CloseReason = exitReason.ToString();
             position.CloseValueUsdt = currentPrice * position.EntryQuantity;
-            position.RealizedPnl = Math.Round(((currentPrice - entry) / entry) * position.EntryValueUsdt, 4);
+            position.RealizedPnl    = Math.Round(((currentPrice - entry) / entry) * position.EntryValueUsdt, 4);
+            position.RealizedPnlPct = Math.Round((currentPrice - entry) / entry * 100m, 4);
         }
 
         var sellSignal = new TradeSignal
@@ -300,5 +408,5 @@ public class TrailingStopMonitorService(
         }
     }
 
-    private enum ExitReason { TakeProfit, TrailingStop, StopLoss }
+    private enum ExitReason { TakeProfit, TrailingStop, StopLoss, MaxHoldTime }
 }

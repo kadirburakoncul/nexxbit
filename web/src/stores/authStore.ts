@@ -27,8 +27,10 @@ function decodeJwt(token: string): JwtPayload | null {
 interface AuthState {
   accessToken: string | null
   refreshToken: string | null
+  accessTokenExpiry: number | null  // unix seconds (JWT exp)
   user: { id: string; email: string; firstName: string; lastName: string; role: string } | null
   setTokens: (access: string, refresh: string) => void
+  updateAccessToken: (access: string) => void
   logout: () => void
   isAdmin: () => boolean
 }
@@ -38,12 +40,14 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       accessToken: null,
       refreshToken: null,
+      accessTokenExpiry: null,
       user: null,
       setTokens: (access, refresh) => {
         const payload = decodeJwt(access)
         set({
           accessToken: access,
           refreshToken: refresh,
+          accessTokenExpiry: payload?.exp ?? null,
           user: payload ? {
             id: payload.sub,
             email: payload.email,
@@ -55,13 +59,26 @@ export const useAuthStore = create<AuthState>()(
         localStorage.setItem('accessToken', access)
         localStorage.setItem('refreshToken', refresh)
       },
+      updateAccessToken: (access) => {
+        const payload = decodeJwt(access)
+        set({ accessToken: access, accessTokenExpiry: payload?.exp ?? null })
+        localStorage.setItem('accessToken', access)
+      },
       logout: () => {
-        set({ accessToken: null, refreshToken: null, user: null })
+        set({ accessToken: null, refreshToken: null, accessTokenExpiry: null, user: null })
         localStorage.removeItem('accessToken')
         localStorage.removeItem('refreshToken')
       },
       isAdmin: () => get().user?.role === 'Admin',
     }),
-    { name: 'auth-store', partialize: (s) => ({ accessToken: s.accessToken, refreshToken: s.refreshToken, user: s.user }) }
+    {
+      name: 'auth-store',
+      partialize: (s) => ({
+        accessToken: s.accessToken,
+        refreshToken: s.refreshToken,
+        accessTokenExpiry: s.accessTokenExpiry,
+        user: s.user,
+      }),
+    }
   )
 )

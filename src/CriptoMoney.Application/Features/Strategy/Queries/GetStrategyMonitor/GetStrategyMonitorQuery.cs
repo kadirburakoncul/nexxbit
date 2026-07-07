@@ -9,7 +9,17 @@ public record StrategyMonitorDto(
     Guid StrategyId,
     string Name,
     string Timeframe,
-    List<CoinMonitorDto> Coins
+    List<CoinMonitorDto> Coins,
+    // Sinyal analizi için strateji filtre ayarları
+    bool IsRsiFilterEnabled,
+    bool IsVolumeSurgeFilterEnabled,
+    decimal VolumeSurgeMultiplier,
+    decimal? MinVolumeUsdt,
+    bool UseMarketRegimeFilter,
+    // Frontend grafiğinin backend ile aynı T3 kullanması için
+    int T3Period,
+    decimal T3VFactor,
+    DateTime? ActivatedAt
 );
 
 public record CoinMonitorDto(

@@ -41,18 +41,41 @@ public class BalanceSnapshotJob(
                     .Where(b => b.Free + b.Locked > 0)
                     .ToList();
 
-                // Toplam değeri USDT bakiyesi + diğer varlıkları yaklaşık hesapla
-                // Basit versiyon: sadece USDT bakiyesini al (tam implementasyon için fiyat feed gerekli)
-                var usdtBalance = nonZero
-                    .Where(b => b.Asset == "USDT")
-                    .Sum(b => b.Free + b.Locked);
+                // Tüm USDT-dışı varlıkların güncel fiyatını çek (toplu, hata olursa tek tek dener)
+                var nonUsdtSymbols = nonZero
+                    .Where(b => b.Asset != "USDT")
+                    .Select(b => b.Asset + "USDT")
+                    .Distinct()
+                    .ToList();
+
+                var prices = await binance.GetBulkPricesAsync(nonUsdtSymbols, ct);
+
+                // Bulk çağrı bazı sembolleri döndürmediyse (örn. Earn/Locked tokenlar) tek tek dene
+                var missing = nonUsdtSymbols.Where(s => !prices.ContainsKey(s)).ToList();
+                foreach (var sym in missing)
+                {
+                    var p = await binance.GetCurrentPriceAsync(sym, ct);
+                    if (p.HasValue) prices[sym] = p.Value;
+                }
+
+                decimal totalValueUsdt = 0;
+                var assetBreakdown = new List<object>();
+                foreach (var b in nonZero)
+                {
+                    var qty = b.Free + b.Locked;
+                    var valueUsdt = b.Asset == "USDT"
+                        ? qty
+                        : prices.TryGetValue(b.Asset + "USDT", out var price) ? qty * price : 0m;
+
+                    totalValueUsdt += valueUsdt;
+                    assetBreakdown.Add(new { b.Asset, Total = qty, ValueUsdt = Math.Round(valueUsdt, 2) });
+                }
 
                 snapshots.Add(new BalanceSnapshot
                 {
                     UserId = userId,
-                    TotalValueUsdt = usdtBalance,
-                    Assets = JsonSerializer.Serialize(
-                        nonZero.Select(b => new { b.Asset, Total = b.Free + b.Locked })),
+                    TotalValueUsdt = Math.Round(totalValueUsdt, 2),
+                    Assets = JsonSerializer.Serialize(assetBreakdown),
                     SnapshotAt = DateTime.UtcNow,
                 });
             }

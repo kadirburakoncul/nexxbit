@@ -1,5 +1,6 @@
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Common.Models;
+using CriptoMoney.Application.Common.Security;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,8 +11,9 @@ public class VerifyEmailCommandHandler(IApplicationDbContext db)
 {
     public async Task<Result> Handle(VerifyEmailCommand request, CancellationToken cancellationToken)
     {
+        var hashedToken = TokenHasher.Hash(request.Token);
         var user = await db.Users
-            .FirstOrDefaultAsync(u => u.EmailVerifyToken == request.Token, cancellationToken);
+            .FirstOrDefaultAsync(u => u.EmailVerifyToken == hashedToken, cancellationToken);
 
         if (user is null)
             return Result.Failure("Geçersiz doğrulama bağlantısı.");

@@ -13,7 +13,7 @@ import { hubUrl } from '@/api/client'
 import {
   TrendingUp, TrendingDown, Wifi, WifiOff, Activity, RefreshCw,
   AlertCircle, ArrowUpRight, ArrowDownRight, Bell, Radar,
-  BarChart3, Zap, ChevronRight, DollarSign, Target, Shield, Flame,
+  BarChart3, ChevronRight, DollarSign, Shield, Flame,
   X, Timer, BarChart2
 } from 'lucide-react'
 import { format, formatDistanceToNow } from 'date-fns'
@@ -24,15 +24,17 @@ import BalanceChart from '@/components/charts/BalanceChart'
 // ─── Metric Card ──────────────────────────────────────────────────────────────
 function MetricCard({
   label, value, sub, icon: Icon, color = 'text-slate-100',
-  accent = 'border-white/5', glow, warn, loading,
+  accent = 'border-white/5', glow, warn, loading, to,
 }: {
   label: string; value: string; sub?: string; icon: React.ElementType
   color?: string; accent?: string; glow?: string; warn?: string; loading?: boolean
+  to?: string
 }) {
-  return (
+  const inner = (
     <div className={cn(
-      'relative bg-white/5 border rounded-2xl p-3 sm:p-5 overflow-hidden',
+      'relative bg-white/5 border rounded-2xl p-3 sm:p-5 overflow-hidden h-full',
       accent,
+      to && 'hover:border-white/15 transition-colors cursor-pointer',
       glow && `before:absolute before:inset-0 before:rounded-2xl before:opacity-20 before:blur-xl before:${glow}`
     )}>
       <div className="flex items-start justify-between mb-4">
@@ -50,6 +52,7 @@ function MetricCard({
       {warn && <p className="text-xs text-amber-400/80 mt-1.5 flex items-center gap-1"><AlertCircle size={10} />{warn}</p>}
     </div>
   )
+  return to ? <Link to={to} className="block">{inner}</Link> : inner
 }
 
 // ─── PnL Badge ───────────────────────────────────────────────────────────────
@@ -227,47 +230,6 @@ function MomentumModal({ coins, countdown, onClose }: {
   )
 }
 
-// ─── Win Rate Ring ────────────────────────────────────────────────────────────
-function WinRateRing({ wins, losses, total }: { wins: number; losses: number; total: number }) {
-  const rate = total > 0 ? (wins / total) * 100 : 0
-  const R = 28, cx = 36, cy = 36
-  const circ = 2 * Math.PI * R
-  const winArc = total > 0 ? (wins / total) * circ : 0
-
-  return (
-    <div className="flex items-center gap-3">
-      <svg width="72" height="72" viewBox="0 0 72 72">
-        <circle cx={cx} cy={cy} r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
-        {total > 0 && (
-          <circle cx={cx} cy={cy} r={R} fill="none" stroke="#10b981" strokeWidth="8"
-            strokeDasharray={`${winArc} ${circ - winArc}`} strokeLinecap="round"
-            transform={`rotate(-90 ${cx} ${cy})`} />
-        )}
-        {losses > 0 && total > 0 && (
-          <circle cx={cx} cy={cy} r={R} fill="none" stroke="#ef4444" strokeWidth="8"
-            strokeDasharray={`${circ - winArc} ${winArc}`} strokeLinecap="round"
-            strokeDashoffset={-winArc} transform={`rotate(-90 ${cx} ${cy})`} />
-        )}
-        <text x={cx} y={cy - 4} textAnchor="middle" fontSize="11" fontWeight="bold" fill="white">
-          {rate.toFixed(0)}%
-        </text>
-        <text x={cx} y={cy + 9} textAnchor="middle" fontSize="7" fill="rgba(148,163,184,0.7)">başarı</text>
-      </svg>
-      <div className="text-xs space-y-1">
-        <div className="flex items-center gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          <span className="text-slate-400">Kazanç <span className="text-emerald-400 font-semibold">{wins}</span></span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
-          <span className="text-slate-400">Kayıp <span className="text-red-400 font-semibold">{losses}</span></span>
-        </div>
-        <div className="text-slate-600">{total} toplam</div>
-      </div>
-    </div>
-  )
-}
-
 // ─── P&L Equity Curve ────────────────────────────────────────────────────────
 
 function PnlEquityChart({ positions }: { positions: Array<{ closedAt: string | null; realizedPnl: number | null }> }) {
@@ -390,6 +352,7 @@ export default function DashboardPage() {
   const [countdown, setCountdown] = useState(MOMENTUM_INTERVAL)
   const [lastSync, setLastSync] = useState<Date>(new Date())
   const [syncing, setSyncing] = useState(false)
+  const [showAssetsModal, setShowAssetsModal] = useState(false)
 
   const syncAll = async () => {
     setSyncing(true)
@@ -418,6 +381,42 @@ export default function DashboardPage() {
     retry: 0,
   })
 
+  // Cüzdandaki USDT-dışı varlıkların güncel USDT karşılığı için tek seferde tüm fiyatları çek
+  const nonUsdtAssets = [...new Set((balances ?? [])
+    .filter(b => b.asset !== 'USDT' && b.free + b.locked > 0)
+    .map(b => b.asset))]
+  const { data: assetPrices } = useQuery({
+    queryKey: ['asset-prices-dashboard', nonUsdtAssets],
+    queryFn: async () => {
+      const res = await fetch('https://api.binance.com/api/v3/ticker/price')
+      const all: { symbol: string; price: string }[] = await res.json()
+      const lookup = new Map(all.map(p => [p.symbol, parseFloat(p.price)]))
+      const result: Record<string, number> = {}
+      for (const asset of nonUsdtAssets) {
+        const price = lookup.get(`${asset}USDT`)
+        if (price != null) result[asset] = price
+      }
+      return result
+    },
+    enabled: nonUsdtAssets.length > 0,
+    refetchInterval: 20_000,
+    staleTime: 15_000,
+  })
+
+  // Anlık toplam portföy değeri (USDT + tüm diğer varlıkların güncel karşılığı) —
+  // gece job'unu beklemeden "Bakiye Geçmişi" grafiğindeki "Şu An" değerini güncel tutar
+  const liveTotalValueUsdt = (() => {
+    const nonZero = (balances ?? []).filter(b => b.free + b.locked > 0)
+    if (nonZero.length === 0) return null
+    const allPriced = nonZero.every(b => b.asset === 'USDT' || assetPrices?.[b.asset] != null)
+    if (!allPriced) return null
+    return nonZero.reduce((sum, b) => {
+      const qty = b.free + b.locked
+      const price = b.asset === 'USDT' ? 1 : assetPrices![b.asset]
+      return sum + qty * price
+    }, 0)
+  })()
+
   const { data: positions } = useQuery({
     queryKey: ['positions', 'dashboard-all'],
     queryFn: () => signalRecordsApi.list({ pageSize: 200 }),
@@ -439,7 +438,7 @@ export default function DashboardPage() {
 
   const { data: momentumCoins, dataUpdatedAt: momentumUpdatedAt } = useQuery({
     queryKey: ['momentum-coins'],
-    queryFn: () => coinsApi.getMomentumCoins(3, 50),
+    queryFn: () => coinsApi.getMomentumCoins(3, 40),
     refetchInterval: MOMENTUM_INTERVAL * 1000,
     staleTime: (MOMENTUM_INTERVAL - 5) * 1000,
   })
@@ -475,24 +474,32 @@ export default function DashboardPage() {
   })
 
   const open = positions?.filter(p => p.status === 'Open' && !p.isVirtual) ?? []
+  const allOpen = positions?.filter(p => p.status === 'Open') ?? []          // sanal + gerçek
   const closed = positions?.filter(p => p.status !== 'Open') ?? []
-  const recentClosed = closed.slice(0, 10)
+  const closedRealPositions = closed.filter(p => !p.isVirtual)               // gerçek kapanan — "Son Kapanan Pozisyonlar"
+  const closedVirtualSignals = closed.filter(p => p.isVirtual)               // sanal kapanan — "Son Kapanan Sinyaller"
+  const recentClosed = closedVirtualSignals.slice(0, 10)
 
   const usdt = balances?.find(b => b.asset === 'USDT')
   const usdtFree = usdt?.free ?? 0
   const usdtLocked = usdt?.locked ?? 0
   const assetCount = balances?.filter(b => b.free + b.locked > 0).length ?? 0
 
-  // P&L %: her işlemin pnlPct'sinin toplamı (sanal + gerçek)
+  // Kapanan sinyaller K/Z (sanal + gerçek)
   const closedPositions = positions?.filter(p => p.status !== 'Open') ?? []
   const closedWithPnlPct = closedPositions.filter(p => p.realizedPnlPct != null)
   const totalPnlPct = closedWithPnlPct.reduce((s, p) => s + (p.realizedPnlPct ?? 0), 0)
   const totalPnlWins = closedWithPnlPct.filter(p => (p.realizedPnlPct ?? 0) > 0).length
   const totalPnlLosses = closedWithPnlPct.filter(p => (p.realizedPnlPct ?? 0) < 0).length
-  const winRate = closedWithPnlPct.length > 0 ? (totalPnlWins / closedWithPnlPct.length) * 100 : 0
 
-  // Anlık açık pozisyon P&L: bulk fiyat çek
-  const openSymbols = open.map(p => p.coinSymbol)
+  // Kapanan gerçek pozisyonlar K/Z
+  const closedReal = closedPositions.filter(p => !p.isVirtual && p.realizedPnlPct != null)
+  const realClosedPnlPct = closedReal.reduce((s, p) => s + (p.realizedPnlPct ?? 0), 0)
+  const realClosedWins   = closedReal.filter(p => (p.realizedPnlPct ?? 0) > 0).length
+  const realClosedLosses = closedReal.filter(p => (p.realizedPnlPct ?? 0) < 0).length
+
+  // Anlık fiyatlar: sanal + gerçek tüm açık pozisyon sembolleri
+  const openSymbols = [...new Set(allOpen.map(p => p.coinSymbol))]
   const { data: livePrices } = useQuery({
     queryKey: ['bulk-prices-dashboard', openSymbols],
     queryFn: async () => {
@@ -511,6 +518,15 @@ export default function DashboardPage() {
     staleTime: 10_000,
   })
 
+  // Açık sinyaller K/Z % toplamı (sanal + gerçek, yüzde toplamı)
+  const signalsOpenItems = allOpen
+    .filter(p => p.entryPrice > 0 && livePrices?.[p.coinSymbol])
+    .map(p => ((livePrices![p.coinSymbol] - p.entryPrice) / p.entryPrice) * 100)
+  const signalsOpenPct = signalsOpenItems.length > 0
+    ? signalsOpenItems.reduce((s, x) => s + x, 0)
+    : null
+
+  // Gerçek açık pozisyonlar unrealized P&L
   const unrealizedPnlUsdt = open.reduce((sum, p) => {
     const livePrice = livePrices?.[p.coinSymbol] ?? 0
     if (!livePrice || !p.entryQuantity) return sum
@@ -558,7 +574,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Hero: top metrics row ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4">
           {/* Bağlantı */}
           <MetricCard
             label="Binance"
@@ -567,14 +583,18 @@ export default function DashboardPage() {
             icon={isConnected ? Wifi : WifiOff}
             color={isConnected ? 'text-emerald-400' : 'text-red-400'}
             accent={isConnected ? 'border-emerald-500/15' : 'border-red-500/15'}
+            to="/binance"
           />
 
           {/* USDT */}
-          <div className="bg-white/5 border border-white/5 rounded-2xl p-5">
+          <div
+            className="bg-white/5 border border-white/5 hover:border-white/15 transition-colors rounded-2xl p-5 h-full cursor-pointer"
+            onClick={() => { if (isConnected && !balanceLoading && !balanceError) setShowAssetsModal(true) }}
+          >
             <div className="flex items-start justify-between mb-4">
-              <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">USDT Bakiye</span>
+              <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Toplam Bakiye</span>
               <button
-                onClick={() => { refetchBal(); qc.invalidateQueries({ queryKey: ['binance-status'] }) }}
+                onClick={e => { e.stopPropagation(); refetchBal(); qc.invalidateQueries({ queryKey: ['binance-status'] }) }}
                 disabled={balanceLoading}
                 className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-slate-600 hover:text-slate-300 transition-colors"
               >
@@ -593,58 +613,200 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : (
-              <p className="text-2xl font-bold text-slate-100">{formatUsdt(usdtFree)}</p>
+              <p className="text-2xl font-bold text-slate-100">
+                {formatUsdt(liveTotalValueUsdt ?? usdtFree)}
+              </p>
             )}
-            {usdtLocked > 0 && <p className="text-xs text-slate-600 mt-1.5">Kilitli: {formatUsdt(usdtLocked)}</p>}
-            {isConnected && !balanceLoading && !balanceError && usdtFree === 0 && (
+            {isConnected && !balanceLoading && !balanceError && (
+              <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1">
+                <span className="text-slate-600">USDT:</span> {formatUsdt(usdtFree)}
+              </p>
+            )}
+            {usdtLocked > 0 && <p className="text-xs text-slate-600 mt-1">Kilitli: {formatUsdt(usdtLocked)}</p>}
+            {isConnected && !balanceLoading && !balanceError && usdtFree === 0 && assetCount === 0 && (
               <p className="text-xs text-amber-400/80 mt-1.5 flex items-center gap-1">
                 <AlertCircle size={10} /> Spot cüzdan boş
               </p>
             )}
             {isConnected && !balanceLoading && !balanceError && assetCount > 0 && (
-              <p className="text-xs text-slate-600 mt-1.5">{assetCount} varlık</p>
+              <p className="text-xs text-slate-500 mt-1.5">{assetCount} varlık · görüntüle</p>
             )}
           </div>
 
-          {/* Toplam K/Z */}
-          <MetricCard
-            label="Toplam K/Z"
-            value={closedWithPnlPct.length > 0
-              ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`
-              : '—'}
-            sub={closedWithPnlPct.length > 0
-              ? `${closedWithPnlPct.length} işlem · ${totalPnlWins}K / ${totalPnlLosses}Z`
-              : undefined}
-            icon={totalPnlPct >= 0 ? TrendingUp : TrendingDown}
-            color={closedWithPnlPct.length === 0 ? 'text-slate-500' : totalPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}
-            accent={totalPnlPct >= 0 ? 'border-emerald-500/10' : 'border-red-500/10'}
-          />
+          {/* Assets Modal */}
+          {showAssetsModal && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              style={{ background: 'rgba(0,0,0,0.7)' }}
+              onClick={() => setShowAssetsModal(false)}
+            >
+              <div
+                className="bg-[#0f1117] border border-white/10 rounded-2xl w-full max-w-sm shadow-2xl"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
+                  <span className="text-sm font-semibold text-slate-100">Spot Varlıklar</span>
+                  <button onClick={() => setShowAssetsModal(false)} className="text-slate-600 hover:text-slate-300 transition-colors">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="max-h-80 overflow-y-auto px-2 py-2">
+                  {(balances ?? [])
+                    .filter(b => b.free + b.locked > 0)
+                    .sort((a, b) => {
+                      if (a.asset === 'USDT') return -1
+                      if (b.asset === 'USDT') return 1
+                      const aVal = a.asset === 'USDT' ? a.free + a.locked : (a.free + a.locked) * (assetPrices?.[a.asset] ?? 0)
+                      const bVal = b.asset === 'USDT' ? b.free + b.locked : (b.free + b.locked) * (assetPrices?.[b.asset] ?? 0)
+                      return bVal - aVal
+                    })
+                    .map(b => {
+                      const qty = b.free + b.locked
+                      const price = b.asset === 'USDT' ? 1 : assetPrices?.[b.asset]
+                      const valueUsdt = price != null ? qty * price : null
+                      return (
+                      <div key={b.asset} className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-white/8 flex items-center justify-center">
+                            <span className="text-[10px] font-bold text-slate-300">{b.asset.slice(0, 3)}</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-100">{b.asset}</p>
+                            {b.locked > 0 && <p className="text-[10px] text-slate-600">Kilitli: {b.locked.toFixed(6).replace(/\.?0+$/, '')}</p>}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-mono text-slate-100">
+                            {b.free < 0.001
+                              ? b.free.toFixed(8).replace(/0+$/, '')
+                              : b.free.toLocaleString('tr-TR', { maximumFractionDigits: 6 })}
+                          </p>
+                          {valueUsdt != null ? (
+                            <p className="text-[10px] text-slate-500">≈ {formatUsdt(valueUsdt)}</p>
+                          ) : b.asset !== 'USDT' ? (
+                            <p className="text-[10px] text-slate-700">fiyat yok</p>
+                          ) : null}
+                        </div>
+                      </div>
+                      )
+                    })
+                  }
+                </div>
+                {(() => {
+                  const nonZero = (balances ?? []).filter(b => b.free + b.locked > 0)
+                  const total = nonZero.reduce((sum, b) => {
+                    const qty = b.free + b.locked
+                    const price = b.asset === 'USDT' ? 1 : assetPrices?.[b.asset]
+                    return sum + (price != null ? qty * price : 0)
+                  }, 0)
+                  const allPriced = nonZero.every(b => b.asset === 'USDT' || assetPrices?.[b.asset] != null)
+                  return nonZero.length > 0 ? (
+                    <div className="flex items-center justify-between px-5 py-3.5 border-t border-white/8 bg-white/[0.02]">
+                      <span className="text-xs text-slate-500">Toplam Değer{!allPriced && ' (kısmi)'}</span>
+                      <span className="text-sm font-bold text-slate-100 font-mono">{formatUsdt(total)}</span>
+                    </div>
+                  ) : null
+                })()}
+              </div>
+            </div>
+          )}
+
+          {/* Toplam Sinyaller K/Z — açık + kapanan */}
+          <Link to="/signals" className="block">
+            <div className="relative bg-white/5 border border-white/5 hover:border-white/15 transition-colors rounded-2xl p-3 sm:p-5 h-full">
+              <div className="flex items-start justify-between mb-3">
+                <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Toplam Sinyaller K/Z</span>
+                <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center">
+                  <TrendingUp size={14} className="text-slate-400" />
+                </div>
+              </div>
+              {/* Kapanan satır */}
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] text-slate-600 uppercase tracking-wider">Kapanan</span>
+                {closedWithPnlPct.length > 0 ? (
+                  <span className={`text-sm font-bold font-mono ${totalPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {totalPnlPct >= 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%
+                  </span>
+                ) : (
+                  <span className="text-sm font-bold text-slate-600">—</span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-600 text-right mb-3">
+                {closedWithPnlPct.length > 0 ? `${closedWithPnlPct.length} işlem · ${totalPnlWins}K / ${totalPnlLosses}Z` : 'henüz yok'}
+              </p>
+              {/* Açık satır */}
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] text-slate-600 uppercase tracking-wider">Açık</span>
+                {signalsOpenPct != null ? (
+                  <span className={`text-sm font-bold font-mono ${signalsOpenPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {signalsOpenPct >= 0 ? '+' : ''}{signalsOpenPct.toFixed(2)}%
+                  </span>
+                ) : (
+                  <span className="text-sm font-bold text-slate-600">—</span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-600 text-right">
+                {allOpen.length > 0 ? `${allOpen.length} pozisyon` : 'açık yok'}
+              </p>
+            </div>
+          </Link>
+
+          {/* Gerçek Pozisyonlar K/Z */}
+          <div className="relative bg-white/5 border border-white/5 hover:border-white/15 transition-colors rounded-2xl p-3 sm:p-5 h-full">
+            <div className="flex items-start justify-between mb-3">
+              <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Gerçek Poz. K/Z</span>
+              <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center">
+                {realClosedPnlPct >= 0
+                  ? <TrendingUp size={14} className="text-emerald-400" />
+                  : <TrendingDown size={14} className="text-red-400" />}
+              </div>
+            </div>
+            {/* Kapanan gerçek */}
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-slate-600 uppercase tracking-wider">Kapanan</span>
+              {closedReal.length > 0 ? (
+                <span className={`text-sm font-bold font-mono ${realClosedPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {realClosedPnlPct >= 0 ? '+' : ''}{realClosedPnlPct.toFixed(2)}%
+                </span>
+              ) : (
+                <span className="text-sm font-bold text-slate-600">—</span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-600 text-right mb-3">
+              {closedReal.length > 0 ? `${closedReal.length} işlem · ${realClosedWins}K / ${realClosedLosses}Z` : 'henüz yok'}
+            </p>
+            {/* Açık gerçek (unrealized) */}
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-slate-600 uppercase tracking-wider">Açık</span>
+              {open.length > 0 && livePrices ? (
+                <span className={`text-sm font-bold font-mono ${unrealizedPnlUsdt >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {unrealizedPnlUsdt >= 0 ? '+' : ''}{unrealizedPnlUsdt.toFixed(2)} $
+                </span>
+              ) : (
+                <span className="text-sm font-bold text-slate-600">—</span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-600 text-right">
+              {open.length > 0
+                ? livePrices
+                  ? `${unrealizedPnlPct >= 0 ? '+' : ''}${unrealizedPnlPct.toFixed(2)}% · ${open.length} poz`
+                  : 'fiyat alınıyor'
+                : 'açık yok'}
+            </p>
+          </div>
 
           {/* Açık Pozisyon */}
           <MetricCard
             label="Açık Pozisyon"
-            value={String(open.length)}
-            sub={open.length > 0 ? open.map(p => p.coinSymbol).join(', ') : 'Şu an aktif pozisyon yok'}
+            value={String(allOpen.length)}
+            sub={allOpen.length > 0
+              ? `${open.length > 0 ? `${open.length} gerçek` : ''}${open.length > 0 && allOpen.length > open.length ? ' · ' : ''}${allOpen.length > open.length ? `${allOpen.length - open.length} sanal` : ''}`
+              : 'Şu an aktif pozisyon yok'}
             icon={Activity}
-            color={open.length > 0 ? 'text-yellow-400' : 'text-slate-500'}
-            accent={open.length > 0 ? 'border-yellow-400/15' : 'border-white/5'}
+            color={allOpen.length > 0 ? 'text-yellow-400' : 'text-slate-500'}
+            accent={allOpen.length > 0 ? 'border-yellow-400/15' : 'border-white/5'}
+            to="/positions"
           />
-
-          {/* Anlık Unrealized P&L */}
-          {open.length > 0 && (
-            <MetricCard
-              label="Anlık P&L"
-              value={livePrices
-                ? `${unrealizedPnlUsdt >= 0 ? '+' : ''}${unrealizedPnlUsdt.toFixed(2)} $`
-                : '…'}
-              sub={livePrices
-                ? `${unrealizedPnlPct >= 0 ? '+' : ''}${unrealizedPnlPct.toFixed(2)}% · ${open.length} pos`
-                : 'Fiyat alınıyor'}
-              icon={unrealizedPnlUsdt >= 0 ? TrendingUp : TrendingDown}
-              color={!livePrices ? 'text-slate-500' : unrealizedPnlUsdt >= 0 ? 'text-emerald-400' : 'text-red-400'}
-              accent={!livePrices ? 'border-white/5' : unrealizedPnlUsdt >= 0 ? 'border-emerald-500/10' : 'border-red-500/10'}
-            />
-          )}
 
           {/* Strateji Takip */}
           <Link to="/monitor" className="block">
@@ -672,9 +834,9 @@ export default function DashboardPage() {
 
             {/* Balance history chart */}
             <div className="bg-white/5 border border-white/5 rounded-2xl p-5">
-              <SectionHeader title="Bakiye Geçmişi" sub="Son 30 gün" icon={BarChart3} />
+              <SectionHeader title="Bakiye Geçmişi" icon={BarChart3} />
               {isConnected ? (
-                <BalanceChart days={30} />
+                <BalanceChart days={30} liveValueUsdt={liveTotalValueUsdt} />
               ) : (
                 <div className="h-32 flex items-center justify-center text-slate-700 text-sm">
                   Binance bağlantısı gerekli
@@ -692,31 +854,26 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Performance summary */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Win/Loss ring */}
-              <div className="bg-white/5 border border-white/5 rounded-2xl p-5">
-                <SectionHeader title="Performans" sub={winRate > 0 ? `${winRate.toFixed(1)}% başarı` : undefined} icon={Target} to="/signals" />
-                <WinRateRing wins={totalPnlWins} losses={totalPnlLosses} total={closedWithPnlPct.length} />
-              </div>
-
-              {/* Open positions quick view */}
-              <div className="bg-white/5 border border-white/5 rounded-2xl p-5">
-                <SectionHeader title="Açık Pozisyonlar" sub={`${open.length} aktif`} icon={Zap} to="/positions" />
-                {open.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-5 text-center">
-                    <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center mb-2">
-                      <Activity size={16} className="text-slate-600" />
-                    </div>
-                    <p className="text-xs text-slate-600">Açık pozisyon yok</p>
+            {/* Son kapanan GERÇEK pozisyonlar — hızlı görünüm */}
+            <div className="bg-white/5 border border-white/5 rounded-2xl p-5">
+              <SectionHeader title="Son Kapanan Pozisyonlar" sub={`${closedRealPositions.length} gerçek pozisyon`} icon={DollarSign} to="/positions" />
+              {closedRealPositions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-5 text-center">
+                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center mb-2">
+                    <DollarSign size={16} className="text-slate-600" />
                   </div>
-                ) : (
-                  <div className="space-y-2 mt-1">
-                    {open.slice(0, 4).map(p => (
+                  <p className="text-xs text-slate-600">Henüz kapanan gerçek pozisyon yok</p>
+                </div>
+              ) : (
+                <div className="space-y-2 mt-1">
+                  {closedRealPositions.slice(0, 4).map(p => {
+                    const pnlPct = p.realizedPnlPct
+                    const pos = pnlPct != null ? pnlPct >= 0 : true
+                    return (
                       <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
                         <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-md bg-yellow-400/10 flex items-center justify-center">
-                            <span className="text-yellow-400 text-[9px] font-bold">{p.coinSymbol.slice(0, 2)}</span>
+                          <div className={cn('w-6 h-6 rounded-md flex items-center justify-center', pos ? 'bg-emerald-400/10' : 'bg-red-400/10')}>
+                            <span className={cn('text-[9px] font-bold', pos ? 'text-emerald-400' : 'text-red-400')}>{p.coinSymbol.slice(0, 2)}</span>
                           </div>
                           <div>
                             <p className="text-xs font-semibold text-slate-200">{p.coinSymbol}</p>
@@ -724,22 +881,24 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-400/10 text-yellow-400 border border-yellow-400/20">Açık</span>
-                          <p className="text-[10px] text-slate-600 mt-0.5">{format(new Date(p.openedAt), 'dd MMM', { locale: tr })}</p>
+                          <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full border', pos ? 'bg-emerald-400/10 text-emerald-400 border-emerald-400/20' : 'bg-red-400/10 text-red-400 border-red-400/20')}>
+                            {pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%` : '—'}
+                          </span>
+                          <p className="text-[10px] text-slate-600 mt-0.5">{p.closedAt ? format(new Date(p.closedAt), 'dd MMM', { locale: tr }) : '—'}</p>
                         </div>
                       </div>
-                    ))}
-                    {open.length > 4 && (
-                      <p className="text-xs text-slate-600 text-center pt-1">+{open.length - 4} daha</p>
-                    )}
-                  </div>
-                )}
-              </div>
+                    )
+                  })}
+                  {closedRealPositions.length > 4 && (
+                    <p className="text-xs text-slate-600 text-center pt-1">+{closedRealPositions.length - 4} daha</p>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Recent closed positions */}
+            {/* Son kapanan SANAL sinyaller */}
             <div className="bg-white/5 border border-white/5 rounded-2xl p-5">
-              <SectionHeader title="Son Kapanan Sinyaller" sub={`${closed.length} kapanan pozisyon`} icon={DollarSign} to="/signals" />
+              <SectionHeader title="Son Kapanan Sinyaller" sub={`${closedVirtualSignals.length} sanal sinyal`} icon={DollarSign} to="/signals" />
               {recentClosed.length === 0 ? (
                 <p className="text-xs text-slate-600 text-center py-6">Henüz kapanan pozisyon yok</p>
               ) : (

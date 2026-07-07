@@ -19,6 +19,8 @@ public record AdminUserDto(
     string LastName,
     UserRole Role,
     bool IsEmailVerified,
+    bool IsApprovedByAdmin,
+    bool IsActive,
     bool SkipLoginOtp,
     bool IsDeleted,
     bool HasBinanceAccount,

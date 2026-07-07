@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/authStore'
 
 const apiOrigin = import.meta.env.VITE_API_URL ?? ''
 
@@ -21,26 +22,84 @@ api.interceptors.request.use((cfg) => {
 })
 
 // 401 → refresh → retry once
+// Race condition koruması: birden fazla eşzamanlı 401 tek bir refresh isteğine indirgenir
+let isRefreshing = false
+let pendingQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = []
+
+function processQueue(error: unknown, token: string | null) {
+  pendingQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error)
+    else resolve(token!)
+  })
+  pendingQueue = []
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
     const original = err.config
+
     if (err.response?.status === 401 && !original._retry) {
+      if (isRefreshing) {
+        // Başka bir refresh devam ediyor — tamamlanmasını bekle
+        return new Promise((resolve, reject) => {
+          pendingQueue.push({
+            resolve: (token) => {
+              original.headers.Authorization = `Bearer ${token}`
+              resolve(api(original))
+            },
+            reject,
+          })
+        })
+      }
+
       original._retry = true
+      isRefreshing = true
+
+      const refreshToken = localStorage.getItem('refreshToken')
+
       try {
-        const refreshToken = localStorage.getItem('refreshToken')
-        const { data } = await axios.post('/api/auth/refresh', { refreshToken })
+        if (!refreshToken) throw new Error('No refresh token')
+
+        const refreshUrl = apiOrigin ? `${apiOrigin}/api/auth/refresh` : '/api/auth/refresh'
+        const { data } = await axios.post(refreshUrl, { refreshToken })
+
         localStorage.setItem('accessToken', data.accessToken)
-        localStorage.setItem('refreshToken', data.refreshToken)
+        if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken)
+
+        if (data.refreshToken) {
+          useAuthStore.getState().setTokens(data.accessToken, data.refreshToken)
+        } else {
+          useAuthStore.getState().updateAccessToken(data.accessToken)
+        }
+
         original.headers.Authorization = `Bearer ${data.accessToken}`
+        processQueue(null, data.accessToken)
         return api(original)
-      } catch {
-        localStorage.removeItem('accessToken')
-        localStorage.removeItem('refreshToken')
+      } catch (refreshErr) {
+        // Başka bir sekme refresh yapmış olabilir — localStorage'a bakarak kontrol et
+        const currentRefresh = localStorage.getItem('refreshToken')
+        const currentAccess  = localStorage.getItem('accessToken')
+
+        if (currentAccess && currentRefresh && currentRefresh !== refreshToken) {
+          // Başka sekme refresh yaptı, yeni token'ları kullan
+          useAuthStore.getState().updateAccessToken(currentAccess)
+          original.headers.Authorization = `Bearer ${currentAccess}`
+          processQueue(null, currentAccess)
+          isRefreshing = false
+          return api(original)
+        }
+
+        processQueue(refreshErr, null)
+        useAuthStore.getState().logout()
         window.location.href = '/login'
+        return Promise.reject(refreshErr)
+      } finally {
+        isRefreshing = false
       }
     }
-    // API'den gelen mesajı göster (401 hariç — o login yönlendirmesi yapıyor)
+
+    // API'den gelen mesajı göster (401 hariç)
     if (err.response?.status !== 401) {
       const msg = err.response?.data?.message
         ?? err.response?.data?.errors?.[0]

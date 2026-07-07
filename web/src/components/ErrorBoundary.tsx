@@ -24,9 +24,11 @@ export default class ErrorBoundary extends Component<Props, State> {
             <h1 className="text-lg font-semibold text-slate-100 mb-1">Beklenmeyen Hata</h1>
             <p className="text-sm text-slate-500">Sayfa yüklenirken bir hata oluştu.</p>
           </div>
-          <pre className="text-left text-xs text-red-400/70 bg-red-500/5 border border-red-500/10 rounded-lg p-3 overflow-auto max-h-32">
-            {this.state.error.message}
-          </pre>
+          <p className="text-xs text-slate-500">
+            {import.meta.env.DEV
+              ? this.state.error.message
+              : 'Beklenmeyen bir hata oluştu. Lütfen sayfayı yenileyiniz.'}
+          </p>
           <button
             onClick={() => window.location.reload()}
             className="inline-flex items-center gap-2 bg-yellow-400 hover:bg-yellow-300 text-black font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors"

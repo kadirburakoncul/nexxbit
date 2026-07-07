@@ -87,22 +87,19 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
         // Deaktifleştirme onay kontrolü (action belirtilmemişse)
         if (strategy.IsActive && action is null)
         {
-            var signalCount = await db.TradeSignals
-                .CountAsync(s => s.StrategyId == id && !s.IsActedUpon, ct);
-
             var realPositionCount = await db.Positions
                 .CountAsync(p => p.StrategyId == id && p.Status == PositionStatus.Open && !p.IsVirtual, ct);
 
             var virtualPositionCount = await db.Positions
                 .CountAsync(p => p.StrategyId == id && p.Status == PositionStatus.Open && p.IsVirtual, ct);
 
-            if (signalCount > 0 || realPositionCount > 0 || virtualPositionCount > 0)
+            if (realPositionCount > 0 || virtualPositionCount > 0)
             {
                 return Ok(new
                 {
                     requiresConfirmation = true,
                     isActive = true,
-                    signalCount,
+                    signalCount = 0,
                     realPositionCount,
                     virtualPositionCount,
                 });
@@ -207,7 +204,18 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
         new(CurrentUserId, strategyId, req.Name, req.IndicatorId, req.CoinIds,
             req.Timeframe, req.TrailingStopPct, req.StopLossPct, req.IsVolatileMode,
             req.TakeProfitPct, req.MinVolumeUsdt, req.VolatilePositionSizePct,
-            req.VolatileMinChangePct, req.VolatileGainerLimit, req.IsRsiFilterEnabled);
+            req.VolatileMinChangePct, req.VolatileGainerLimit, req.IsRsiFilterEnabled,
+            req.MomentumFreshFilterMinutes,
+            req.UseAtrBasedStops, req.AtrPeriod, req.AtrSlMultiplier, req.AtrTpMultiplier,
+            req.PartialTpPct, req.PartialTpClosePct,
+            req.IsVolumeSurgeFilterEnabled, req.VolumeSurgeMultiplier,
+            req.UseMarketRegimeFilter,
+            req.IsEma200RuleEnabled,
+            req.MaxHoldHours, req.SlCooldownHours, req.IsGreenCandleFilterEnabled,
+            req.MaxOpenPositions, req.MaxPositionSizeUsdt, req.MaxPositionSizePct, req.MinPositionSizeUsdt,
+            req.UseAdxFilter, req.AdxPeriod, req.AdxMinValue,
+            req.UseMacdFilter,
+            req.UseBreakevenStop, req.BreakevenTriggerPct);
 }
 
 public class UpsertStrategyRequest
@@ -225,4 +233,31 @@ public class UpsertStrategyRequest
     public decimal VolatileMinChangePct { get; set; } = 3.0m;
     public int VolatileGainerLimit { get; set; } = 20;
     public bool IsRsiFilterEnabled { get; set; } = false;
+    public int MomentumFreshFilterMinutes { get; set; } = 5;
+    public bool UseAtrBasedStops { get; set; } = false;
+    public int AtrPeriod { get; set; } = 14;
+    public decimal AtrSlMultiplier { get; set; } = 1.5m;
+    public decimal AtrTpMultiplier { get; set; } = 3.0m;
+    public decimal? PartialTpPct { get; set; }
+    public decimal PartialTpClosePct { get; set; } = 50m;
+    public bool IsVolumeSurgeFilterEnabled { get; set; } = false;
+    public decimal VolumeSurgeMultiplier { get; set; } = 2.0m;
+    public bool UseMarketRegimeFilter { get; set; } = true;
+    public bool IsEma200RuleEnabled { get; set; } = true;
+    public int MaxHoldHours { get; set; } = 8;
+    public int SlCooldownHours { get; set; } = 4;
+    public bool IsGreenCandleFilterEnabled { get; set; } = true;
+    public int MaxOpenPositions { get; set; } = 5;
+    public decimal? MaxPositionSizeUsdt { get; set; }
+    public decimal? MaxPositionSizePct { get; set; }
+    public decimal MinPositionSizeUsdt { get; set; } = 10m;
+    // ADX filtresi
+    public bool UseAdxFilter { get; set; } = false;
+    public int AdxPeriod { get; set; } = 14;
+    public decimal AdxMinValue { get; set; } = 25m;
+    // MACD filtresi
+    public bool UseMacdFilter { get; set; } = false;
+    // Breakeven stop
+    public bool UseBreakevenStop { get; set; } = false;
+    public decimal BreakevenTriggerPct { get; set; } = 1.5m;
 }

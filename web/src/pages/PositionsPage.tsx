@@ -6,31 +6,51 @@ import { formatUsdt, pnlColor } from '@/lib/utils'
 import Header from '@/components/layout/Header'
 import { usePushNotification } from '@/hooks/usePushNotification'
 import { exportCsv } from '@/lib/exportCsv'
-import { Download } from 'lucide-react'
 import {
   TrendingUp, TrendingDown, Wallet, BarChart2,
   Clock, CheckCircle2, Activity,
   Trophy, ArrowDownRight, ArrowUpRight,
-  AlertTriangle, DollarSign, X, ChevronDown,
+  AlertTriangle, DollarSign, X, Download, ShieldAlert,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// ─── Yardımcı ────────────────────────────────────────────────────────────────
-function useLivePrice(symbol: string): number | undefined {
-  const { data } = useQuery({
-    queryKey: ['live-price', symbol],
-    queryFn: async () => {
-      const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(symbol)}`)
-      const json = await res.json()
-      return parseFloat(json.price)
-    },
-    refetchInterval: 5_000,
-    staleTime: 4_000,
-  })
-  return data
+// ─── Yardımcılar ──────────────────────────────────────────────────────────────
+
+function parseUtc(str: string): Date {
+  return new Date(str.endsWith('Z') || str.includes('+') ? str : str + 'Z')
 }
 
-// Binance standart komisyon: %0.1 alış + %0.1 satış
+function fmtDate(str: string | null | undefined): string {
+  if (!str) return '—'
+  return parseUtc(str).toLocaleString('tr-TR', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    timeZone: 'Europe/Istanbul',
+  })
+}
+
+function calcDuration(from: string, to?: string | null): string {
+  const ms = (to ? parseUtc(to) : new Date()).getTime() - parseUtc(from).getTime()
+  if (ms < 0) return '—'
+  const h = Math.floor(ms / 3_600_000)
+  const m = Math.floor((ms % 3_600_000) / 60_000)
+  const s = Math.floor((ms % 60_000) / 1_000)
+  if (h >= 24) return `${Math.floor(h / 24)}g ${h % 24}s`
+  if (h > 0) return `${h}s ${m}d`
+  if (m > 0) return `${m}d ${s}s`
+  return `${s}s`
+}
+
+function fmtPrice(n: number | null | undefined): string {
+  if (n == null || n === 0) return '—'
+  const abs = Math.abs(n)
+  let d: number
+  if (abs >= 1000) d = 2
+  else if (abs >= 1) d = 4
+  else if (abs >= 0.001) d = 6
+  else d = 8
+  return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
+}
+
 const COMM_RATE = 0.001
 function calcComm(entryVal: number, closeVal: number) {
   const total = (entryVal + closeVal) * COMM_RATE
@@ -38,73 +58,166 @@ function calcComm(entryVal: number, closeVal: number) {
   return { total, pct }
 }
 
-function fmtTR(str: string | null | undefined): string {
-  if (!str) return '—'
-  const s = str.endsWith('Z') || str.includes('+') ? str : str + 'Z'
-  return new Date(s).toLocaleString('tr-TR', {
-    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-    timeZone: 'Europe/Istanbul',
+function useLivePrice(symbol: string): number | undefined {
+  const { data } = useQuery({
+    queryKey: ['live-price', symbol],
+    queryFn: async () => {
+      const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(symbol)}`)
+      return parseFloat((await res.json()).price)
+    },
+    refetchInterval: 5_000,
+    staleTime: 4_000,
   })
+  return data
 }
 
-function calcDuration(from: string, to?: string | null): string {
-  const ms = (to ? new Date(to.endsWith('Z') ? to : to + 'Z') : new Date()).getTime()
-           - new Date(from.endsWith('Z') ? from : from + 'Z').getTime()
-  if (ms < 0) return '—'
-  const h = Math.floor(ms / 3_600_000)
-  const m = Math.floor((ms % 3_600_000) / 60_000)
-  const s = Math.floor((ms % 60_000) / 1_000)
-  if (h >= 24) return `${Math.floor(h / 24)}g ${h % 24}s`
-  if (h > 0)   return `${h}s ${m}d`
-  if (m > 0)   return `${m}d ${s}s`
-  return `${s}s`
-}
-
-// Canlı sayaç — açık pozisyonlar için her saniye güncellenir
-function useLiveDuration(openedAt: string, isOpen: boolean): string {
+function useLiveDuration(openedAt: string): string {
   const [, setTick] = useState(0)
   const ref = useRef<ReturnType<typeof setInterval> | null>(null)
   useEffect(() => {
-    if (!isOpen) return
     ref.current = setInterval(() => setTick(t => t + 1), 1000)
     return () => { if (ref.current) clearInterval(ref.current) }
-  }, [isOpen])
+  }, [])
   return calcDuration(openedAt)
 }
 
-function OpenPositionDuration({ openedAt }: { openedAt: string }) {
-  const dur = useLiveDuration(openedAt, true)
-  return <span>{dur}</span>
+// ─── CloseReasonBadge ─────────────────────────────────────────────────────────
+
+function CloseReasonBadge({ record }: { record: SignalRecord }) {
+  const reason = record.closeReason
+  if (!reason) return <span className="text-slate-700">—</span>
+  const r = reason.toLowerCase()
+
+  if (r === 'takeprofit') {
+    const pnl = record.realizedPnlPct
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+          ✅ Kar Al (TP)
+        </span>
+        {pnl != null && <div className="text-[10px] text-emerald-600 mt-0.5">Hedef fiyata ulaşıldı: +{pnl.toFixed(2)}%</div>}
+      </div>
+    )
+  }
+
+  if (r === 'trailingstop') {
+    const peakPnl = record.peakPnlPct
+    const pnl = record.realizedPnlPct
+    const dropFromPeak = peakPnl != null && pnl != null ? pnl - peakPnl : null
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-500/15 text-orange-400 border border-orange-500/25">
+          🔁 Trailing Stop
+        </span>
+        <div className="text-[10px] text-slate-500 mt-0.5">
+          {peakPnl != null && (
+            <span>Zirve: <span className={peakPnl > 0 ? 'text-emerald-600' : 'text-red-600'}>{peakPnl > 0 ? '+' : ''}{peakPnl.toFixed(2)}%</span></span>
+          )}
+          {dropFromPeak != null && <span className="ml-1 text-orange-600">→ {dropFromPeak.toFixed(2)}% geri çekildi</span>}
+        </div>
+      </div>
+    )
+  }
+
+  if (r === 'stoploss') {
+    const pnl = record.realizedPnlPct
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/15 text-red-400 border border-red-500/25">
+          🛑 Stop Loss
+        </span>
+        {pnl != null && <div className="text-[10px] text-red-600 mt-0.5">Zarar kesme: {pnl.toFixed(2)}%</div>}
+      </div>
+    )
+  }
+
+  if (r === 'maxholdtime') {
+    const pnl = record.realizedPnlPct
+    const openedMs = record.openedAt ? parseUtc(record.openedAt).getTime() : null
+    const closedMs = record.closedAt ? parseUtc(record.closedAt).getTime() : null
+    const hours = openedMs && closedMs ? (closedMs - openedMs) / 3_600_000 : null
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/20 text-slate-400 border border-slate-500/25">
+          ⏰ Süre Sınırı
+        </span>
+        <div className="text-[10px] text-slate-500 mt-0.5">
+          {hours != null && <span>{hours.toFixed(1)}sa açık kaldı</span>}
+          {pnl != null && <span className={cn('ml-1', pnl > 0 ? 'text-emerald-600' : 'text-red-600')}>{pnl > 0 ? '+' : ''}{pnl.toFixed(2)}%</span>}
+        </div>
+      </div>
+    )
+  }
+
+  if (r.includes('manual') || r.includes('manuel')) {
+    const pnl = record.realizedPnlPct
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-yellow-500/15 text-yellow-400 border border-yellow-500/25">
+          👤 Manuel Satış
+        </span>
+        {pnl != null && <div className={cn('text-[10px] mt-0.5', pnl > 0 ? 'text-emerald-600' : 'text-red-600')}>{pnl > 0 ? '+' : ''}{pnl.toFixed(2)}%</div>}
+      </div>
+    )
+  }
+
+  if (r.includes('momentum')) {
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/25">
+          📊 Momentum Kaybı
+        </span>
+        <div className="text-[10px] text-slate-500 mt-0.5">Coin artık momentum listesinde değil</div>
+      </div>
+    )
+  }
+
+  if (r.includes('strateji')) {
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/15 text-purple-400 border border-purple-500/25">
+          ⛔ Strateji Kapatıldı
+        </span>
+        <div className="text-[10px] text-slate-500 mt-0.5 max-w-32 truncate" title={reason}>{reason}</div>
+      </div>
+    )
+  }
+
+  if (r.includes('t3') || r.includes('sell') || r.includes('sat')) {
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/15 text-purple-400 border border-purple-500/25">
+          📉 T3 SAT Sinyali
+        </span>
+        <div className="text-[10px] text-slate-500 mt-0.5">İndikatör SAT sinyali üretti</div>
+      </div>
+    )
+  }
+
+  return <span className="text-slate-500 text-[10px] max-w-28 block truncate" title={reason}>{reason}</span>
 }
 
-function fmtPrice(n: number): string {
-  if (n >= 1000)  return n.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
-  if (n >= 1)     return n.toLocaleString('tr-TR', { maximumFractionDigits: 4 })
-  return n.toLocaleString('tr-TR', { maximumFractionDigits: 8 })
-}
+// ─── Özet kart ────────────────────────────────────────────────────────────────
 
-// ─── Özet kart ───────────────────────────────────────────────────────────────
 function SummaryCard({ label, value, sub, icon, accent = 'slate' }: {
   label: string; value: string; sub?: string
   icon: React.ReactNode; accent?: 'slate' | 'emerald' | 'red' | 'amber'
 }) {
   const ring: Record<string, string> = {
-    slate:   'border-white/8 bg-white/[0.03]',
+    slate: 'border-white/8 bg-white/[0.03]',
     emerald: 'border-emerald-500/20 bg-emerald-500/5',
-    red:     'border-red-500/20 bg-red-500/5',
-    amber:   'border-amber-500/20 bg-amber-500/5',
+    red: 'border-red-500/20 bg-red-500/5',
+    amber: 'border-amber-500/20 bg-amber-500/5',
   }
   const ic: Record<string, string> = {
-    slate:   'bg-white/8 text-slate-400',
+    slate: 'bg-white/8 text-slate-400',
     emerald: 'bg-emerald-500/20 text-emerald-400',
-    red:     'bg-red-500/20 text-red-400',
-    amber:   'bg-amber-500/20 text-amber-400',
+    red: 'bg-red-500/20 text-red-400',
+    amber: 'bg-amber-500/20 text-amber-400',
   }
   return (
     <div className={`rounded-xl border p-4 flex items-start gap-3 ${ring[accent]}`}>
-      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${ic[accent]}`}>
-        {icon}
-      </div>
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${ic[accent]}`}>{icon}</div>
       <div className="min-w-0">
         <p className="text-xs text-slate-500">{label}</p>
         <p className="text-base font-bold text-slate-100 truncate">{value}</p>
@@ -114,9 +227,11 @@ function SummaryCard({ label, value, sub, icon, accent = 'slate' }: {
   )
 }
 
-// ─── Manuel Sat bileşeni ──────────────────────────────────────────────────────
-function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone: () => void }) {
-  const [open, setOpen] = useState(false)
+// ─── Manuel Sat paneli ────────────────────────────────────────────────────────
+
+function ManualSellPanel({ position, onDone, onClose }: {
+  position: SignalRecord; onDone: () => void; onClose: () => void
+}) {
   const [mode, setMode] = useState<'market' | 'limit' | null>(null)
   const [limitPrice, setLimitPrice] = useState('')
   const [belowTarget, setBelowTarget] = useState<null | { currentPrice: number; diff: number }>(null)
@@ -135,30 +250,15 @@ function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone:
     },
     onError: (error: any) => {
       const body = error?.response?.data
-      if (body?.belowTarget) {
-        setBelowTarget({ currentPrice: body.currentPrice!, diff: body.diff! })
-      }
+      if (body?.belowTarget) setBelowTarget({ currentPrice: body.currentPrice!, diff: body.diff! })
     },
   })
 
   const err = (sellMut.error as any)?.response?.data?.errors?.[0] ?? (sellMut.error as any)?.message
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
-      >
-        <DollarSign size={12} />
-        Manuel Sat
-        <ChevronDown size={11} />
-      </button>
-    )
-  }
-
   if (result) {
     return (
-      <div className="mt-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-3 text-xs text-emerald-300 space-y-1">
+      <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-3 text-xs text-emerald-300 space-y-1">
         <p className="font-semibold">Satış tamamlandı ✓</p>
         <p>Fiyat: <span className="font-mono">${fmtPrice(result.fillPrice)}</span></p>
         {result.realizedPnl != null && (
@@ -172,22 +272,16 @@ function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone:
   }
 
   return (
-    <div className="mt-3 bg-white/[0.03] border border-orange-500/20 rounded-xl p-4 space-y-3">
+    <div className="bg-white/[0.03] border border-orange-500/20 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-orange-300">Manuel Satış — {position.coinSymbol}</p>
-        <button onClick={() => { setOpen(false); setMode(null); setBelowTarget(null) }} className="text-slate-500 hover:text-slate-300">
-          <X size={13} />
-        </button>
+        <button onClick={onClose} className="text-slate-500 hover:text-slate-300"><X size={13} /></button>
       </div>
-
-      {/* Seçenek butonları */}
       <div className="grid grid-cols-2 gap-2">
         <button
           onClick={() => { setMode('market'); setBelowTarget(null) }}
           className={cn('flex items-center gap-2 p-3 rounded-lg border text-left transition-colors',
-            mode === 'market'
-              ? 'bg-red-500/15 border-red-500/30 text-red-300'
-              : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20')}
+            mode === 'market' ? 'bg-red-500/15 border-red-500/30 text-red-300' : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20')}
         >
           <Activity size={13} />
           <div>
@@ -195,13 +289,10 @@ function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone:
             <p className="text-[10px] text-slate-500 mt-0.5">Market emri — anında gerçekleşir</p>
           </div>
         </button>
-
         <button
           onClick={() => { setMode('limit'); setBelowTarget(null) }}
           className={cn('flex items-center gap-2 p-3 rounded-lg border text-left transition-colors',
-            mode === 'limit'
-              ? 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300'
-              : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20')}
+            mode === 'limit' ? 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300' : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20')}
         >
           <DollarSign size={13} />
           <div>
@@ -210,16 +301,12 @@ function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone:
           </div>
         </button>
       </div>
-
-      {/* Limit fiyat girişi */}
       {mode === 'limit' && (
         <div className="space-y-2">
           <label className="text-[10px] text-slate-500">Hedef Satış Fiyatı (USDT)</label>
           <div className="relative">
             <input
-              type="number"
-              step="any"
-              value={limitPrice}
+              type="number" step="any" value={limitPrice}
               onChange={e => { setLimitPrice(e.target.value); setBelowTarget(null) }}
               placeholder={`Giriş fiyatı: ${fmtPrice(position.entryPrice)}`}
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-yellow-400/50"
@@ -228,8 +315,6 @@ function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone:
           </div>
         </div>
       )}
-
-      {/* Fiyat düşük uyarısı */}
       {belowTarget && (
         <div className="bg-red-500/10 border border-red-500/25 rounded-lg p-3 space-y-2">
           <div className="flex items-center gap-2 text-xs text-red-300">
@@ -248,25 +333,16 @@ function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone:
             >
               {sellMut.isPending ? 'Satılıyor…' : 'Yine de Sat (Güncel Fiyattan)'}
             </button>
-            <button onClick={() => setBelowTarget(null)} className="text-xs text-slate-500 hover:text-slate-300 px-2">
-              İptal
-            </button>
+            <button onClick={() => setBelowTarget(null)} className="text-xs text-slate-500 hover:text-slate-300 px-2">İptal</button>
           </div>
         </div>
       )}
-
-      {/* Hata */}
       {err && <p className="text-xs text-red-400 flex items-center gap-1"><AlertTriangle size={11} />{err}</p>}
-
-      {/* Onayla */}
       {!belowTarget && (
         <button
           onClick={() => {
-            if (mode === 'market') {
-              sellMut.mutate({ type: 'market' })
-            } else if (mode === 'limit' && limitPrice) {
-              sellMut.mutate({ type: 'limit', limitPrice: parseFloat(limitPrice) })
-            }
+            if (mode === 'market') sellMut.mutate({ type: 'market' })
+            else if (mode === 'limit' && limitPrice) sellMut.mutate({ type: 'limit', limitPrice: parseFloat(limitPrice) })
           }}
           disabled={sellMut.isPending || !mode || (mode === 'limit' && !limitPrice)}
           className="w-full bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 text-sm font-semibold py-2 rounded-lg transition-colors disabled:opacity-40"
@@ -278,179 +354,409 @@ function ManualSellPanel({ position, onDone }: { position: SignalRecord; onDone:
   )
 }
 
-// ─── Açık pozisyon kartı ─────────────────────────────────────────────────────
-function OpenPositionCard({ p }: { p: SignalRecord }) {
-  const qc = useQueryClient()
-  const isOrphaned = !p.isVirtual && p.strategyId != null && p.strategyIsActive === false
+// ─── Açık pozisyon satırı ─────────────────────────────────────────────────────
+
+function OpenPositionRow({ p, onSold }: { p: SignalRecord; onSold: () => void }) {
+  const [selling, setSelling] = useState(false)
+  const isOrphaned = p.strategyId != null && p.strategyIsActive === false
   const livePrice = useLivePrice(p.coinSymbol)
+  const duration = useLiveDuration(p.openedAt)
 
   const entryVal = p.entryValueUsdt > 0 ? p.entryValueUsdt : p.entryPrice * p.entryQuantity
-  const closeEst = livePrice != null
-    ? (p.entryQuantity > 0 ? livePrice * p.entryQuantity : (p.entryPrice > 0 ? livePrice / p.entryPrice * entryVal : 0))
-    : 0
-  const pnlPct = livePrice != null && p.entryPrice > 0
-    ? ((livePrice - p.entryPrice) / p.entryPrice) * 100
-    : null
+  const closeEst = livePrice != null && p.entryQuantity > 0 ? livePrice * p.entryQuantity : 0
+  const pnlPct = livePrice != null && p.entryPrice > 0 ? ((livePrice - p.entryPrice) / p.entryPrice) * 100 : null
   const comm = entryVal > 0 && closeEst > 0 ? calcComm(entryVal, closeEst) : null
   const netPnlPct = pnlPct != null && comm != null ? pnlPct - comm.pct : null
+  const pnlUsdt = pnlPct != null && entryVal > 0 ? (pnlPct / 100) * entryVal : null
+  const pnlClass = pnlPct == null ? 'text-slate-600' : pnlPct > 0 ? 'text-emerald-400' : pnlPct < 0 ? 'text-red-400' : 'text-slate-400'
 
   return (
-    <div className={cn(
-      'bg-white/[0.03] rounded-xl p-4 space-y-3 transition-colors',
-      isOrphaned
-        ? 'border border-orange-500/30 hover:border-orange-500/50'
-        : 'border border-emerald-500/20 hover:border-emerald-500/40'
-    )}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center',
-            isOrphaned ? 'bg-orange-500/15' : 'bg-emerald-500/15')}>
-            <span className={cn('text-xs font-bold', isOrphaned ? 'text-orange-400' : 'text-emerald-400')}>
-              {p.coinSymbol.replace('USDT', '')}
-            </span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-bold text-slate-100">{p.coinSymbol}</span>
-              <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-semibold border',
-                isOrphaned
-                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/20'
-                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20')}>
-                {isOrphaned ? 'STRATEJİ KAPALI' : 'AÇIK'}
-              </span>
+    <>
+      <tr className={cn('hover:bg-white/[0.04] transition-colors', isOrphaned && 'bg-orange-500/[0.04]')}>
+        {/* Coin */}
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0',
+              isOrphaned ? 'bg-orange-500/15 text-orange-400' : 'bg-emerald-500/15 text-emerald-400')}>
+              {p.coinSymbol.replace('USDT', '').slice(0, 3)}
             </div>
-            <span className="text-xs text-slate-500">{fmtTR(p.openedAt)} · <OpenPositionDuration openedAt={p.openedAt} /></span>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-slate-100">{p.coinSymbol}</span>
+                <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-semibold border',
+                  isOrphaned
+                    ? 'bg-orange-500/20 text-orange-400 border-orange-500/20'
+                    : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20')}>
+                  {isOrphaned ? 'SAHİPSİZ' : 'AÇIK'}
+                </span>
+              </div>
+              {p.strategyName && <p className="text-[10px] text-yellow-400/60 mt-0.5">{p.strategyName}</p>}
+              {isOrphaned && <p className="text-[10px] text-orange-400/70 mt-0.5">Strateji kapatıldı</p>}
+            </div>
           </div>
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-slate-600">Süre</p>
-          <p className="text-sm font-semibold text-slate-300"><OpenPositionDuration openedAt={p.openedAt} /></p>
-        </div>
-      </div>
+        </td>
 
-      {/* Orphaned uyarısı */}
-      {isOrphaned && (
-        <div className="flex items-start gap-2 bg-orange-500/8 border border-orange-500/20 rounded-lg px-3 py-2">
-          <AlertTriangle size={12} className="text-orange-400 mt-0.5 shrink-0" />
-          <p className="text-xs text-orange-300">
-            Bağlı strateji <strong>"{p.strategyName}"</strong> kapatıldı — manuel satış yapılabilir.
-          </p>
-        </div>
-      )}
+        {/* Alış fiyatı + tarihi */}
+        <td className="px-4 py-3 text-right font-mono text-xs">
+          <div className="text-slate-300">{fmtPrice(p.entryPrice)}</div>
+          <div className="text-slate-600 text-[10px] mt-0.5">{fmtDate(p.openedAt)}</div>
+        </td>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div className="bg-white/5 rounded-lg p-2.5">
-          <p className="text-[10px] text-slate-600">Giriş Fiyatı</p>
-          <p className="text-xs font-semibold text-slate-200 font-mono">{fmtPrice(p.entryPrice)}</p>
-        </div>
-        <div className="bg-white/5 rounded-lg p-2.5">
-          <p className="text-[10px] text-slate-600">Yatırılan</p>
-          <p className="text-xs font-semibold text-slate-200 font-mono">
-            {p.entryValueUsdt > 0 ? formatUsdt(p.entryValueUsdt) : '—'}
-          </p>
-        </div>
-        <div className="bg-white/5 rounded-lg p-2.5">
-          <p className="text-[10px] text-slate-600">Miktar</p>
-          <p className="text-xs font-semibold text-slate-200 font-mono">
-            {p.entryQuantity > 0
-              ? `${p.entryQuantity.toLocaleString('tr-TR', { maximumFractionDigits: 6 })} ${p.coinSymbol.replace('USDT', '')}`
-              : '—'}
-          </p>
-        </div>
-      </div>
+        {/* Yatırılan + Miktar */}
+        <td className="px-4 py-3 text-right text-xs">
+          <div className="text-slate-300 font-mono">{entryVal > 0 ? formatUsdt(entryVal) : '—'}</div>
+          {p.entryQuantity > 0 && (
+            <div className="text-slate-600 text-[10px] mt-0.5 font-mono">
+              {p.entryQuantity.toLocaleString('en-US', { maximumFractionDigits: 6 })} {p.coinSymbol.replace('USDT', '')}
+            </div>
+          )}
+        </td>
 
-      {/* Anlık K/Z + Komisyon satırı */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div className="bg-white/5 rounded-lg p-2.5">
-          <p className="text-[10px] text-slate-600">Anlık Fiyat</p>
-          <p className="text-xs font-semibold font-mono text-slate-100">
-            {livePrice != null ? fmtPrice(livePrice) : <span className="text-slate-700">—</span>}
-          </p>
-        </div>
-        <div className="bg-white/5 rounded-lg p-2.5">
-          <p className="text-[10px] text-slate-600">Gerç. K/Z</p>
-          {pnlPct != null ? (
-            <>
-              <p className={cn('text-xs font-bold font-mono tabular-nums',
-                pnlPct > 0 ? 'text-emerald-400' : pnlPct < 0 ? 'text-red-400' : 'text-slate-400')}>
-                {pnlPct > 0 ? '+' : ''}{pnlPct.toFixed(2)}%
-              </p>
-              {netPnlPct != null && (
-                <p className={cn('text-[10px] font-mono tabular-nums',
-                  netPnlPct > 0 ? 'text-emerald-600' : netPnlPct < 0 ? 'text-red-600' : 'text-slate-600')}>
-                  {netPnlPct > 0 ? '+' : ''}{netPnlPct.toFixed(2)}% net
-                </p>
+        {/* Anlık fiyat */}
+        <td className="px-4 py-3 text-right font-mono text-xs">
+          {livePrice != null
+            ? <span className="text-slate-100 font-semibold">{fmtPrice(livePrice)}</span>
+            : <span className="text-slate-700">—</span>}
+        </td>
+
+        {/* En Yüksek */}
+        <td className="px-4 py-3 text-right font-mono text-xs">
+          {p.peakPrice != null ? (
+            <div>
+              <div className="text-purple-300 font-semibold">{fmtPrice(p.peakPrice)}</div>
+              {p.peakPnlPct != null && (
+                <div className={cn('text-[10px] tabular-nums mt-0.5', p.peakPnlPct > 0 ? 'text-emerald-500' : 'text-red-500')}>
+                  {p.peakPnlPct > 0 ? '+' : ''}{p.peakPnlPct.toFixed(2)}%
+                </div>
               )}
-            </>
-          ) : (
-            <p className="text-xs text-slate-700">—</p>
-          )}
-        </div>
-        <div className="bg-white/5 rounded-lg p-2.5">
-          <p className="text-[10px] text-slate-600">Tahmini Kom. <span className="text-slate-700">(0.1%×2)</span></p>
-          {comm != null ? (
-            <>
-              <p className="text-xs font-semibold font-mono text-slate-400">~${comm.total.toFixed(2)}</p>
-              <p className="text-[10px] font-mono text-slate-600">~%{comm.pct.toFixed(2)}</p>
-            </>
-          ) : (
-            <p className="text-xs text-slate-700">—</p>
-          )}
-        </div>
-      </div>
+            </div>
+          ) : <span className="text-slate-700">—</span>}
+        </td>
 
-      {!isOrphaned && (
-        <div className="flex items-center gap-2 pt-0.5">
-          <Activity size={11} className="text-emerald-500/60" />
-          <span className="text-xs text-slate-600">Trailing stop takibinde · gerçek zamanlı izleniyor</span>
-        </div>
+        {/* SL / TP */}
+        <td className="px-4 py-3 text-right font-mono text-xs">
+          <div className="space-y-0.5">
+            {p.stopLossPrice != null ? (
+              <div className="flex items-center justify-end gap-1">
+                <ShieldAlert size={9} className="text-red-500" />
+                <span className="text-red-400 font-semibold">{fmtPrice(p.stopLossPrice)}</span>
+              </div>
+            ) : <div className="text-slate-700 text-[10px]">SL yok</div>}
+            {p.takeProfitPrice != null ? (
+              <div className="flex items-center justify-end gap-1">
+                <span className="text-[9px] text-emerald-600">✅</span>
+                <span className="text-emerald-400 font-semibold">{fmtPrice(p.takeProfitPrice)}</span>
+              </div>
+            ) : <div className="text-slate-700 text-[10px]">TP yok</div>}
+            {p.trailingStopPct != null && (
+              <div className="text-orange-400/70 text-[10px]">↩ {p.trailingStopPct}% trailing</div>
+            )}
+          </div>
+        </td>
+
+        {/* K/Z */}
+        <td className="px-4 py-3 text-right">
+          <div className={cn('font-mono text-sm font-semibold tabular-nums', pnlClass)}>
+            {pnlPct != null ? `${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(2)}%` : '—'}
+          </div>
+          {pnlUsdt != null && (
+            <div className={cn('text-[10px] font-mono tabular-nums mt-0.5', pnlUsdt > 0 ? 'text-emerald-600' : 'text-red-600')}>
+              {pnlUsdt > 0 ? '+' : ''}{formatUsdt(pnlUsdt)}
+            </div>
+          )}
+          {netPnlPct != null && (
+            <div className={cn('text-[10px] font-mono tabular-nums mt-0.5', netPnlPct > 0 ? 'text-emerald-700' : 'text-red-700')}>
+              {netPnlPct > 0 ? '+' : ''}{netPnlPct.toFixed(2)}% <span className="text-slate-700">net</span>
+            </div>
+          )}
+        </td>
+
+        {/* Süre */}
+        <td className="px-4 py-3 text-right text-xs">
+          <span className="font-mono text-yellow-400 font-semibold tabular-nums">{duration}</span>
+        </td>
+
+        {/* Aksiyon */}
+        <td className="px-4 py-3 text-right">
+          <button
+            onClick={() => setSelling(s => !s)}
+            className="flex items-center gap-1 text-xs bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 font-medium px-2.5 py-1.5 rounded-lg transition-colors ml-auto"
+          >
+            <DollarSign size={11} /> Manuel Sat
+          </button>
+        </td>
+      </tr>
+
+      {selling && (
+        <tr>
+          <td colSpan={9} className="px-4 pb-3 pt-0">
+            <ManualSellPanel position={p} onDone={onSold} onClose={() => setSelling(false)} />
+          </td>
+        </tr>
       )}
-      <ManualSellPanel
-        position={p}
-        onDone={() => qc.invalidateQueries({ queryKey: ['positions', 'real'] })}
-      />
+    </>
+  )
+}
+
+// ─── Açık pozisyonlar tablo bileşeni ─────────────────────────────────────────
+
+function OpenPositionsTable({ rows, onSold }: { rows: SignalRecord[]; onSold: () => void }) {
+  return (
+    <div className="bg-white/[0.03] border border-emerald-500/15 rounded-xl overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-white/8 flex items-center gap-2 bg-white/[0.02]">
+        <Activity size={14} className="text-emerald-400" />
+        <span className="text-sm font-semibold text-slate-200">Açık Pozisyonlar</span>
+        <span className="text-xs text-slate-600">({rows.length})</span>
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-600">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          Canlı izleniyor
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px]">
+          <thead>
+            <tr className="border-b border-white/5 text-[10px] text-slate-600 uppercase tracking-wider">
+              <th className="text-left px-4 py-3">Coin</th>
+              <th className="text-right px-4 py-3">Alış</th>
+              <th className="text-right px-4 py-3">Yatırılan</th>
+              <th className="text-right px-4 py-3">Anlık</th>
+              <th className="text-right px-4 py-3">En Yüksek</th>
+              <th className="text-right px-4 py-3">SL / TP</th>
+              <th className="text-right px-4 py-3">K/Z</th>
+              <th className="text-right px-4 py-3">Süre</th>
+              <th className="text-right px-4 py-3">Aksiyon</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.04]">
+            {rows.map(r => <OpenPositionRow key={r.id} p={r} onSold={onSold} />)}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
 
-// ─── Sayfa ───────────────────────────────────────────────────────────────────
+// ─── Kapalı pozisyonlar tablosu ───────────────────────────────────────────────
+
+function ClosedPositionsTable({ rows }: { rows: SignalRecord[] }) {
+  const totalPnl = rows.reduce((s, r) => s + (r.realizedPnl ?? 0), 0)
+
+  return (
+    <div className="bg-white/[0.03] border border-white/8 rounded-xl overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-white/8 flex items-center justify-between bg-white/[0.02]">
+        <div className="flex items-center gap-2">
+          <BarChart2 size={14} className="text-slate-500" />
+          <span className="text-sm font-semibold text-slate-200">Kapalı Pozisyonlar</span>
+          <span className="text-xs text-slate-600">({rows.length})</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-600">Toplam K/Z:</span>
+          <span className={`font-bold ${pnlColor(totalPnl)}`}>
+            {totalPnl >= 0 ? '+' : ''}{formatUsdt(totalPnl)}
+          </span>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[960px]">
+          <thead>
+            <tr className="border-b border-white/5 text-[10px] text-slate-600 uppercase tracking-wider">
+              <th className="text-left px-4 py-3">Sembol</th>
+              <th className="text-right px-4 py-3">Alış</th>
+              <th className="text-right px-4 py-3">Satış</th>
+              <th className="text-right px-4 py-3">Yatırılan → Çıkış</th>
+              <th className="text-right px-4 py-3">En Yüksek</th>
+              <th className="text-right px-4 py-3">Net K/Z</th>
+              <th className="text-left px-4 py-3">Sebep</th>
+              <th className="text-right px-4 py-3">Süre</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.04]">
+            {rows.map(p => {
+              const pnl = p.realizedPnl ?? 0
+              const pnlPct = p.realizedPnlPct ?? 0
+              const isWin = pnl > 0
+              const entryVal = p.entryValueUsdt > 0 ? p.entryValueUsdt : 0
+              const closeVal = p.closeValueUsdt ?? 0
+              const rowComm = entryVal > 0 && closeVal > 0 ? calcComm(entryVal, closeVal) : null
+              const netPct = rowComm != null ? pnlPct - rowComm.pct : pnlPct
+              const netIsWin = netPct > 0
+
+              return (
+                <tr key={p.id} className="hover:bg-white/[0.04] transition-colors">
+                  {/* Sembol */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0',
+                        isWin ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400')}>
+                        {p.coinSymbol.replace('USDT', '').slice(0, 3)}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-200">{p.coinSymbol}</p>
+                        {p.strategyName && <p className="text-[10px] text-yellow-400/60 mt-0.5">{p.strategyName}</p>}
+                      </div>
+                    </div>
+                  </td>
+
+                  {/* Alış fiyatı + tarihi */}
+                  <td className="px-4 py-3 text-right font-mono text-xs">
+                    <div className="text-slate-300">{fmtPrice(p.entryPrice)}</div>
+                    <div className="text-slate-600 text-[10px] mt-0.5">{fmtDate(p.openedAt)}</div>
+                  </td>
+
+                  {/* Satış fiyatı + tarihi */}
+                  <td className="px-4 py-3 text-right font-mono text-xs">
+                    {p.closePrice != null ? (
+                      <>
+                        <div className="text-slate-300">{fmtPrice(p.closePrice)}</div>
+                        <div className="text-slate-600 text-[10px] mt-0.5">{fmtDate(p.closedAt)}</div>
+                      </>
+                    ) : <span className="text-slate-700">—</span>}
+                  </td>
+
+                  {/* Yatırılan → Çıkış değeri */}
+                  <td className="px-4 py-3 text-right text-xs">
+                    {entryVal > 0 ? (
+                      <div>
+                        <div className="text-slate-400 font-mono">{formatUsdt(entryVal)}</div>
+                        {closeVal > 0 && (
+                          <div className={cn('text-[10px] font-mono mt-0.5', isWin ? 'text-emerald-600' : 'text-red-600')}>
+                            → {formatUsdt(closeVal)}
+                          </div>
+                        )}
+                      </div>
+                    ) : <span className="text-slate-700">—</span>}
+                  </td>
+
+                  {/* En Yüksek */}
+                  <td className="px-4 py-3 text-right font-mono text-xs">
+                    {p.peakPrice != null ? (
+                      <div>
+                        <div className="text-purple-400/80">{fmtPrice(p.peakPrice)}</div>
+                        {p.peakPnlPct != null && (
+                          <div className={cn('text-[10px] tabular-nums mt-0.5',
+                            p.peakPnlPct > 0 ? 'text-emerald-600' : 'text-red-600')}>
+                            {p.peakPnlPct > 0 ? '+' : ''}{p.peakPnlPct.toFixed(2)}%
+                          </div>
+                        )}
+                      </div>
+                    ) : <span className="text-slate-700">—</span>}
+                  </td>
+
+                  {/* Net K/Z */}
+                  <td className="px-4 py-3 text-right">
+                    <div className={cn('flex items-center justify-end gap-1 text-xs font-bold',
+                      isWin ? 'text-emerald-400' : pnl < 0 ? 'text-red-400' : 'text-slate-400')}>
+                      {isWin ? <ArrowUpRight size={12} /> : pnl < 0 ? <ArrowDownRight size={12} /> : null}
+                      {pnl !== 0 ? `${isWin ? '+' : ''}${formatUsdt(pnl)}` : '—'}
+                    </div>
+                    <div className={cn('text-[10px] font-bold font-mono tabular-nums mt-0.5 px-1.5 py-0.5 rounded-md inline-block',
+                      isWin ? 'bg-emerald-500/15 text-emerald-400' : pnl < 0 ? 'bg-red-500/15 text-red-400' : 'text-slate-500')}>
+                      {pnlPct !== 0 ? `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%` : '—'}
+                    </div>
+                    {rowComm != null && (
+                      <div className={cn('text-[10px] font-mono tabular-nums mt-0.5',
+                        netIsWin ? 'text-emerald-700' : 'text-red-700')}>
+                        {netPct > 0 ? '+' : ''}{netPct.toFixed(2)}% <span className="text-slate-700">net</span>
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Sebep */}
+                  <td className="px-4 py-3">
+                    <CloseReasonBadge record={p} />
+                  </td>
+
+                  {/* Süre */}
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1 text-xs text-slate-500">
+                      <Clock size={10} />
+                      {calcDuration(p.openedAt, p.closedAt)}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-5 py-3 border-t border-white/5 bg-white/[0.02] flex items-center justify-between">
+        <div className="flex items-center gap-4 text-xs text-slate-600">
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            {rows.filter(p => (p.realizedPnl ?? 0) > 0).length} kazanç
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-red-400" />
+            {rows.filter(p => (p.realizedPnl ?? 0) < 0).length} kayıp
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          {rows.filter(p => (p.realizedPnl ?? 0) > 0).length > 0 && (
+            <span className="text-slate-600">
+              Ort. kazanç:{' '}
+              <span className="text-emerald-400 font-semibold">
+                {formatUsdt(
+                  rows.filter(p => (p.realizedPnl ?? 0) > 0).reduce((s, p) => s + (p.realizedPnl ?? 0), 0) /
+                  rows.filter(p => (p.realizedPnl ?? 0) > 0).length
+                )}
+              </span>
+            </span>
+          )}
+          {rows.filter(p => (p.realizedPnl ?? 0) < 0).length > 0 && (
+            <span className="text-slate-600">
+              Ort. kayıp:{' '}
+              <span className="text-red-400 font-semibold">
+                {formatUsdt(
+                  rows.filter(p => (p.realizedPnl ?? 0) < 0).reduce((s, p) => s + (p.realizedPnl ?? 0), 0) /
+                  rows.filter(p => (p.realizedPnl ?? 0) < 0).length
+                )}
+              </span>
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Ana sayfa ────────────────────────────────────────────────────────────────
+
 type Tab = 'open' | 'closed' | 'all'
 
 export default function PositionsPage() {
   const [tab, setTab] = useState<Tab>('open')
   const { notify, permission, requestPermission } = usePushNotification()
   const prevClosedIds = useRef<Set<string>>(new Set())
+  const qc = useQueryClient()
 
   const { data: positions, isLoading } = useQuery({
     queryKey: ['positions', 'real'],
     queryFn: () => signalRecordsApi.list({ isVirtual: false }),
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
   })
 
   const open   = useMemo(() => positions?.filter(p => p.status === 'Open') ?? [], [positions])
   const closed = useMemo(() => positions?.filter(p => p.status !== 'Open') ?? [], [positions])
 
-  // Push notification: yeni kapanan pozisyon tespit et
   useEffect(() => {
     if (!positions) return
     const newlyClosed = closed.filter(p => !prevClosedIds.current.has(p.id))
     newlyClosed.forEach(p => {
       const pnl = p.realizedPnlPct
       const sign = pnl != null && pnl >= 0 ? '+' : ''
-      notify(
-        `${p.coinSymbol} Pozisyonu Kapandı`,
-        `${p.closeReason ?? 'Kapandı'} · P&L: ${sign}${pnl?.toFixed(2) ?? '?'}%`
-      )
+      notify(`${p.coinSymbol} Pozisyonu Kapandı`, `${p.closeReason ?? 'Kapandı'} · P&L: ${sign}${pnl?.toFixed(2) ?? '?'}%`)
     })
     prevClosedIds.current = new Set(closed.map(p => p.id))
   }, [closed, notify])
-  const shown  = tab === 'open' ? open : tab === 'closed' ? closed : (positions ?? [])
 
-  // Özet istatistikler
+  const shown = tab === 'open' ? open : tab === 'closed' ? closed : (positions ?? [])
+
   const totalInvested  = open.reduce((s, p) => s + p.entryValueUsdt, 0)
   const totalClosedPnl = closed.reduce((s, p) => s + (p.realizedPnl ?? 0), 0)
-  const wins           = closed.filter(p => (p.realizedPnl ?? 0) > 0).length
-  const winRate        = closed.length > 0 ? (wins / closed.length) * 100 : null
+  const wins    = closed.filter(p => (p.realizedPnl ?? 0) > 0).length
+  const winRate = closed.length > 0 ? (wins / closed.length) * 100 : null
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'open',   label: 'Açık',   count: open.length },
@@ -458,42 +764,14 @@ export default function PositionsPage() {
     { key: 'all',    label: 'Tümü',   count: positions?.length ?? 0 },
   ]
 
+  const onSold = () => qc.invalidateQueries({ queryKey: ['positions', 'real'] })
+
   return (
     <>
       <Header title="Pozisyonlar" />
       <div className="p-3 md:p-6 space-y-5">
 
-        {/* Araçlar */}
-        <div className="flex items-center gap-2 justify-end -mb-2">
-          {permission !== 'granted' && (
-            <button
-              onClick={requestPermission}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-400/10 border border-yellow-400/20 rounded-lg text-xs text-yellow-400 hover:bg-yellow-400/20 transition-colors"
-            >
-              🔔 Kapanış bildirimleri
-            </button>
-          )}
-          <button
-            onClick={() => exportCsv('pozisyonlar', (positions ?? []).map(p => ({
-              Coin: p.coinSymbol,
-              Strateji: p.strategyName ?? '',
-              Durum: p.status,
-              Giriş: p.entryPrice,
-              Çıkış: p.closePrice ?? '',
-              'P&L%': p.realizedPnlPct ?? '',
-              'P&L USDT': p.realizedPnl ?? '',
-              Sebep: p.closeReason ?? '',
-              AçılışTarihi: p.openedAt,
-              KapanışTarihi: p.closedAt ?? '',
-            })))}
-            disabled={!positions?.length}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-white/10 disabled:opacity-40 transition-colors"
-          >
-            <Download size={12} /> CSV
-          </button>
-        </div>
-
-        {/* ── Özet Kartları ── */}
+        {/* Özet Kartları */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <SummaryCard
             label="Açık Pozisyon"
@@ -525,8 +803,8 @@ export default function PositionsPage() {
           />
         </div>
 
-        {/* ── Sekmeler ── */}
-        <div className="flex items-center gap-1.5">
+        {/* Sekmeler + Araçlar */}
+        <div className="flex items-center gap-1.5 flex-wrap">
           {tabs.map(t => (
             <button
               key={t.key}
@@ -545,10 +823,45 @@ export default function PositionsPage() {
               </span>
             </button>
           ))}
-          <span className="ml-auto text-xs text-slate-600">Her 15 saniyede yenilenir</span>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-slate-600">Her 5sn yenilenir</span>
+            {permission !== 'granted' && (
+              <button
+                onClick={requestPermission}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-400/10 border border-yellow-400/20 rounded-lg text-xs text-yellow-400 hover:bg-yellow-400/20 transition-colors"
+              >
+                🔔 Bildirimler
+              </button>
+            )}
+            <button
+              onClick={() => exportCsv('pozisyonlar', (positions ?? []).map(p => ({
+                Coin: p.coinSymbol,
+                Strateji: p.strategyName ?? '',
+                Durum: p.status,
+                AlışFiyatı: p.entryPrice,
+                AlışTarihi: p.openedAt,
+                SatışFiyatı: p.closePrice ?? '',
+                SatışTarihi: p.closedAt ?? '',
+                Yatırılan: p.entryValueUsdt,
+                ÇıkışDeğeri: p.closeValueUsdt ?? '',
+                EnYüksek: p.peakPrice ?? '',
+                EnYüksekPct: p.peakPnlPct ?? '',
+                'P&L%': p.realizedPnlPct ?? '',
+                'P&L USDT': p.realizedPnl ?? '',
+                Sebep: p.closeReason ?? '',
+                SL: p.stopLossPrice ?? '',
+                TP: p.takeProfitPrice ?? '',
+                TrailingStop: p.trailingStopPct ?? '',
+              })))}
+              disabled={!positions?.length}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-white/10 disabled:opacity-40 transition-colors"
+            >
+              <Download size={12} /> CSV
+            </button>
+          </div>
         </div>
 
-        {/* ── Yükleniyor ── */}
+        {/* Yükleniyor */}
         {isLoading && (
           <div className="flex items-center justify-center gap-2 py-16 text-slate-500">
             <Activity size={16} className="animate-pulse" />
@@ -556,7 +869,7 @@ export default function PositionsPage() {
           </div>
         )}
 
-        {/* ── Boş durum ── */}
+        {/* Boş durum */}
         {!isLoading && shown.length === 0 && (
           <div className="flex flex-col items-center gap-4 py-20 text-center">
             <div className="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/8 flex items-center justify-center">
@@ -567,248 +880,22 @@ export default function PositionsPage() {
                 {tab === 'open' ? 'Açık pozisyon bulunmuyor' : tab === 'closed' ? 'Kapalı pozisyon bulunmuyor' : 'Henüz pozisyon açılmamış'}
               </p>
               <p className="text-slate-600 text-sm mt-1">
-                {tab === 'open'
-                  ? 'Strateji sinyal ürettiğinde pozisyon otomatik açılır'
-                  : 'İşlem kapatıldığında burada görünecek'}
+                {tab === 'open' ? 'Strateji sinyal ürettiğinde pozisyon otomatik açılır' : 'İşlem kapatıldığında burada görünecek'}
               </p>
             </div>
           </div>
         )}
 
-        {/* ── Açık pozisyon kartları ── */}
-        {!isLoading && tab === 'open' && open.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {open.map(p => <OpenPositionCard key={p.id} p={p} />)}
-          </div>
+        {/* Açık pozisyonlar */}
+        {!isLoading && (tab === 'open' || tab === 'all') && open.length > 0 && (
+          <OpenPositionsTable rows={open} onSold={onSold} />
         )}
 
-        {/* ── Kapalı pozisyonlar tablosu ── */}
+        {/* Kapalı pozisyonlar */}
         {!isLoading && (tab === 'closed' || tab === 'all') && shown.filter(p => p.status !== 'Open').length > 0 && (
           <ClosedPositionsTable rows={shown.filter(p => p.status !== 'Open')} />
         )}
-
-        {/* ── Tümü sekmesinde açık + kapalı birlikte ── */}
-        {!isLoading && tab === 'all' && open.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-xs text-slate-500 uppercase tracking-wider">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Açık Pozisyonlar
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {open.map(p => <OpenPositionCard key={p.id} p={p} />)}
-            </div>
-          </div>
-        )}
       </div>
     </>
-  )
-}
-
-// ─── Kapalı pozisyonlar tablosu ──────────────────────────────────────────────
-function ClosedPositionsTable({ rows }: { rows: SignalRecord[] }) {
-  const totalPnl = rows.reduce((s, r) => s + (r.realizedPnl ?? 0), 0)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-
-  return (
-    <div className="bg-white/[0.03] border border-white/8 rounded-xl overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-white/8 flex items-center justify-between bg-white/[0.02]">
-        <div className="flex items-center gap-2">
-          <BarChart2 size={14} className="text-slate-500" />
-          <span className="text-sm font-semibold text-slate-200">Kapalı Pozisyonlar</span>
-          <span className="text-xs text-slate-600">({rows.length})</span>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-slate-600">Toplam K/Z:</span>
-          <span className={`font-bold ${pnlColor(totalPnl)}`}>
-            {totalPnl >= 0 ? '+' : ''}{formatUsdt(totalPnl)}
-          </span>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[750px]">
-          <thead>
-            <tr className="border-b border-white/5 text-[10px] text-slate-600 uppercase tracking-wider">
-              <th className="text-left px-5 py-3">Sembol</th>
-              <th className="text-right px-4 py-3">Giriş</th>
-              <th className="text-right px-4 py-3">Çıkış</th>
-              <th className="text-right px-4 py-3">Yatırılan</th>
-              <th className="text-right px-4 py-3">Net P&L</th>
-              <th className="text-right px-4 py-3">P&L %</th>
-              <th className="text-left px-4 py-3">Sebep</th>
-              <th className="text-right px-5 py-3">Süre</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/[0.04]">
-            {rows.map(p => {
-              const pnl = p.realizedPnl ?? 0
-              const pnlPct = p.realizedPnlPct ?? 0
-              const isWin = pnl > 0
-              const entryVal = p.entryValueUsdt > 0 ? p.entryValueUsdt : 0
-              const closeVal = p.closeValueUsdt ?? 0
-              const rowComm = entryVal > 0 && closeVal > 0 ? calcComm(entryVal, closeVal) : null
-              const netPct = rowComm != null ? pnlPct - rowComm.pct : null
-              const netIsWin = (netPct ?? 0) > 0
-              return (
-                <React.Fragment key={p.id}>
-                <tr
-                  className="hover:bg-white/[0.04] transition-colors group cursor-pointer"
-                  onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
-                >
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-2.5">
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                        isWin ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-                      }`}>
-                        {p.coinSymbol.replace('USDT', '').slice(0, 3)}
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-200">{p.coinSymbol}</p>
-                        {p.strategyName && <p className="text-[10px] text-yellow-400/60">{p.strategyName}</p>}
-                        <p className="text-[10px] text-slate-600">{fmtTR(p.openedAt)}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <p className="text-xs font-mono text-slate-300">{fmtPrice(p.entryPrice)}</p>
-                  </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <p className="text-xs font-mono text-slate-400">
-                      {p.closePrice != null ? fmtPrice(p.closePrice) : '—'}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <p className="text-xs font-mono text-slate-400">
-                      {p.entryValueUsdt > 0 ? formatUsdt(p.entryValueUsdt) : '—'}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <div className={`flex items-center justify-end gap-1 text-xs font-bold ${pnlColor(pnl)}`}>
-                      {isWin ? <ArrowUpRight size={12} /> : pnl < 0 ? <ArrowDownRight size={12} /> : null}
-                      {pnl !== 0 ? `${isWin ? '+' : ''}${formatUsdt(pnl)}` : '—'}
-                    </div>
-                    {rowComm != null && (
-                      <div className="text-[10px] font-mono text-slate-700 text-right mt-0.5">
-                        ~${rowComm.total.toFixed(2)} kom.
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <div className={`text-xs font-bold px-2 py-0.5 rounded-md inline-block ${
-                      isWin ? 'bg-emerald-500/15 text-emerald-400'
-                        : pnl < 0 ? 'bg-red-500/15 text-red-400'
-                        : 'text-slate-500'
-                    }`}>
-                      {pnlPct !== 0 ? `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%` : '—'}
-                    </div>
-                    {netPct != null && (
-                      <div className={cn('text-[10px] font-mono tabular-nums mt-0.5',
-                        netIsWin ? 'text-emerald-600' : 'text-red-600')}>
-                        {netPct > 0 ? '+' : ''}{netPct.toFixed(2)}% <span className="text-slate-700">net</span>
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span className={`text-xs px-2 py-0.5 rounded border ${
-                      p.closeReason?.toLowerCase().includes('trailing')
-                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                        : p.closeReason?.toLowerCase().includes('stop')
-                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                        : p.closeReason?.toLowerCase().includes('manuel')
-                        ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                        : 'bg-white/5 text-slate-500 border-white/10'
-                    }`}>
-                      {p.closeReason ?? '—'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-1 text-xs text-slate-500">
-                      <Clock size={10} />
-                      {calcDuration(p.openedAt, p.closedAt)}
-                    </div>
-                  </td>
-                </tr>
-                {expandedId === p.id && (
-                  <tr className="bg-white/[0.02]">
-                    <td colSpan={8} className="px-6 py-3 border-b border-white/5">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                        <div>
-                          <p className="text-slate-600 mb-0.5">Pozisyon ID</p>
-                          <p className="text-slate-400 font-mono text-[10px] break-all">{p.id}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600 mb-0.5">Açılış</p>
-                          <p className="text-slate-300 font-mono">{new Date(p.openedAt).toLocaleString('tr-TR')}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600 mb-0.5">Kapanış</p>
-                          <p className="text-slate-300 font-mono">{p.closedAt ? new Date(p.closedAt).toLocaleString('tr-TR') : '—'}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600 mb-0.5">Tahmini Komisyon</p>
-                          <p className="text-slate-300 font-mono">{rowComm != null ? `~$${rowComm.total.toFixed(3)}` : '—'}</p>
-                        </div>
-                        {p.closePrice != null && (
-                          <div>
-                            <p className="text-slate-600 mb-0.5">Çıkış Değeri</p>
-                            <p className="text-slate-300 font-mono">{formatUsdt(p.closeValueUsdt ?? 0)}</p>
-                          </div>
-                        )}
-                        {netPct != null && (
-                          <div>
-                            <p className="text-slate-600 mb-0.5">Net P&L (kom. sonrası)</p>
-                            <p className={cn('font-mono font-bold', netIsWin ? 'text-emerald-400' : 'text-red-400')}>
-                              {netPct > 0 ? '+' : ''}{netPct.toFixed(3)}%
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )}
-                </React.Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="px-5 py-3 border-t border-white/5 bg-white/[0.02] flex items-center justify-between">
-        <div className="flex items-center gap-4 text-xs text-slate-600">
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            {rows.filter(p => (p.realizedPnl ?? 0) > 0).length} kazanç
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-red-400"></span>
-            {rows.filter(p => (p.realizedPnl ?? 0) < 0).length} kayıp
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs">
-          {rows.filter(p => (p.realizedPnl ?? 0) > 0).length > 0 && (
-            <span className="text-slate-600">
-              Ort. kazanç:{' '}
-              <span className="text-emerald-400 font-semibold">
-                {formatUsdt(
-                  rows.filter(p => (p.realizedPnl ?? 0) > 0).reduce((s, p) => s + (p.realizedPnl ?? 0), 0) /
-                  rows.filter(p => (p.realizedPnl ?? 0) > 0).length
-                )}
-              </span>
-            </span>
-          )}
-          {rows.filter(p => (p.realizedPnl ?? 0) < 0).length > 0 && (
-            <span className="text-slate-600 ml-3">
-              Ort. kayıp:{' '}
-              <span className="text-red-400 font-semibold">
-                {formatUsdt(
-                  rows.filter(p => (p.realizedPnl ?? 0) < 0).reduce((s, p) => s + (p.realizedPnl ?? 0), 0) /
-                  rows.filter(p => (p.realizedPnl ?? 0) < 0).length
-                )}
-              </span>
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
   )
 }

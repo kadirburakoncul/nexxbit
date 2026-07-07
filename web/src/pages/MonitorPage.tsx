@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { strategiesApi } from '@/api/strategies'
 import type { StrategyMonitor, CoinMonitor } from '@/api/strategies'
-import { indicatorsApi } from '@/api/indicators'
 import Header from '@/components/layout/Header'
 import { formatDistanceToNow } from 'date-fns'
 import { tr } from 'date-fns/locale'
@@ -42,8 +41,11 @@ const DIR_COLOR: Record<string, string> = {
   Buy: 'text-emerald-400', Sell: 'text-red-400', StrongSell: 'text-red-500', Hold: 'text-slate-500'
 }
 
-import { fetchBinanceKlines, computeT3, deriveSignals, pricePrecision } from '@/lib/t3chart'
-import type { BKline, T3Result } from '@/lib/t3chart'
+import {
+  fetchBinanceKlines, computeT3, deriveSignals, pricePrecision,
+  computeSignalAnalysis, UTC3_OFFSET,
+} from '@/lib/t3chart'
+import type { BKline, T3Result, SignalAnalysis, SignalFilterSettings } from '@/lib/t3chart'
 
 
 // ─── Countdown Hook ───────────────────────────────────────────────────────────
@@ -134,15 +136,16 @@ function T3Chart({
     const fmt = pricePrecision(candles[candles.length - 1].close)
     candleRef.current.applyOptions({ priceFormat: { type: 'price', ...fmt } })
     lineRef.current.applyOptions({ priceFormat: { type: 'price', ...fmt } })
+    const toT = (t: number): Time => (t + UTC3_OFFSET) as Time
     candleRef.current.setData(
-      candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close }))
+      candles.map(c => ({ time: toT(c.time), open: c.open, high: c.high, low: c.low, close: c.close }))
     )
     lineRef.current.setData(
-      candles.map((c, i) => ({ time: c.time as Time, value: t3[i] ?? c.close }))
+      candles.map((c, i) => ({ time: toT(c.time), value: t3[i] ?? c.close }))
     )
     if (signals.length > 0) {
       const markers: SeriesMarker<Time>[] = signals.map(s => ({
-        time: s.time as Time,
+        time: toT(s.time),
         position: s.side === 'buy' ? 'belowBar' : 'aboveBar',
         color: s.side === 'buy' ? '#10b981' : '#ef4444',
         shape: s.side === 'buy' ? 'arrowUp' : 'arrowDown',
@@ -186,9 +189,28 @@ function T3StatusBadge({ t3Result }: { t3Result?: T3Result }) {
   )
 }
 
+// ─── Signal Analysis Row ──────────────────────────────────────────────────────
+function AnalysisRow({ label, ok, value, enabled = true }: {
+  label: string; ok: boolean | null; value?: string; enabled?: boolean
+}) {
+  if (!enabled) return null
+  const icon = ok === null ? '⚪' : ok ? '✅' : '❌'
+  const color = ok === null ? 'text-slate-600' : ok ? 'text-emerald-400' : 'text-red-400'
+  return (
+    <div className="flex items-center justify-between py-1 border-b border-white/5 last:border-0">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px]">{icon}</span>
+        <span className="text-[11px] text-slate-400">{label}</span>
+      </div>
+      {value && <span className={`text-[11px] font-mono font-semibold ${color}`}>{value}</span>}
+    </div>
+  )
+}
+
 // ─── Coin Card ────────────────────────────────────────────────────────────────
-function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
-  coin: CoinMonitor; timeframe: string; t3Period: number; t3VFactor: number; strategyId: string
+function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId, filterSettings, activatedAt }: {
+  coin: CoinMonitor; timeframe: string; t3Period: number; t3VFactor: number
+  strategyId: string; filterSettings: SignalFilterSettings; activatedAt: string | null
 }) {
   const [expanded, setExpanded] = useState(false)
   const qc = useQueryClient()
@@ -200,9 +222,9 @@ function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
   const { data: klines, isFetching } = useQuery({
     queryKey: ['binance-klines', coin.coinSymbol, timeframe],
     queryFn: () => fetchBinanceKlines(coin.coinSymbol, timeframe, 200),
-    enabled: expanded,
-    refetchInterval: expanded ? 60_000 : false,
-    staleTime: 30_000,
+    enabled: true,
+    refetchInterval: expanded ? 60_000 : 300_000,
+    staleTime: 60_000,
   })
 
   const t3Result = useMemo(() => {
@@ -215,16 +237,16 @@ function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
     return deriveSignals(klines, t3Result.values)
   }, [klines, t3Result])
 
-  // Frontend'den hesaplanan son sinyal (chart ile senkron)
-  const lastLiveSignal = signals.length > 0 ? signals[signals.length - 1] : null
-  const liveSignalDirection = lastLiveSignal?.side === 'buy' ? 'Buy' : lastLiveSignal?.side === 'sell' ? 'Sell' : null
-  const liveSignalPrice = lastLiveSignal && klines
-    ? klines.find(k => k.time === lastLiveSignal.time)?.close ?? null
-    : null
-  const liveSignalTime = lastLiveSignal ? new Date(lastLiveSignal.time * 1000).toISOString() : null
-
-  const hasSignal = !!liveSignalDirection || !!coin.lastSignalAt
+  // SON SİNYAL başlığında YALNIZCA backend DB sinyali göster.
+  // liveSignalDirection frontend hesaplaması — T3StatusBadge ve Sinyal Analizi'nde gösterilir,
+  // başlıkta göstermek backend'le çelişen yanıltıcı "AL · 9 dk önce" mesajına yol açar.
+  const hasSignal = !!coin.lastSignalAt
   const hasCheck = !!coin.lastCheckedAt
+
+  const analysis = useMemo((): SignalAnalysis | null => {
+    if (!klines || !t3Result) return null
+    return computeSignalAnalysis(klines, t3Result, filterSettings, coin.lastCheckedReason ?? null)
+  }, [klines, t3Result, filterSettings, coin.lastCheckedReason])
 
   return (
     <div className="bg-[#0f1117] border border-white/8 rounded-2xl overflow-hidden">
@@ -271,46 +293,46 @@ function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
           </div>
         </div>
 
-        {/* Signal / last check info — her ikisini de göster */}
-        <div className="text-right shrink-0 mr-2 space-y-0.5 min-w-[120px]" onClick={e => e.stopPropagation()}>
-          {hasSignal && (
-            <div>
-              <div className="flex items-center justify-end gap-1">
-                <span className="text-[10px] text-slate-600 uppercase tracking-wider">Son Sinyal</span>
-                <span className={cn('text-xs font-bold', DIR_COLOR[liveSignalDirection ?? coin.lastSignalDirection ?? ''] ?? 'text-slate-400')}>
-                  {DIR_LABEL[liveSignalDirection ?? coin.lastSignalDirection ?? ''] ?? '—'}
-                </span>
-              </div>
-              <div className="flex items-center justify-end gap-1">
-                {(liveSignalPrice ?? coin.lastSignalPrice) != null && (
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {(liveSignalPrice ?? coin.lastSignalPrice)!.toLocaleString('tr-TR', { maximumFractionDigits: 4 })}
+        {/* Signal / last check info — sabit iki blok, kartlar eşit yükseklikte kalır */}
+        <div className="text-right shrink-0 mr-2 space-y-1 min-w-[130px]" onClick={e => e.stopPropagation()}>
+          {/* Son Sinyal — her zaman göster */}
+          <div>
+            <div className="flex items-center justify-end gap-1">
+              <span className="text-[10px] text-slate-600 uppercase tracking-wider">Son Sinyal</span>
+              {hasSignal
+                ? <span className={cn('text-xs font-bold', DIR_COLOR[coin.lastSignalDirection ?? ''] ?? 'text-slate-400')}>
+                    {DIR_LABEL[coin.lastSignalDirection ?? ''] ?? '—'}
                   </span>
-                )}
-                {(liveSignalTime ?? coin.lastSignalAt) && (
-                  <span className="text-[10px] text-slate-600">
-                    · {formatDistanceToNow(parseUtc((liveSignalTime ?? coin.lastSignalAt)!), { addSuffix: true, locale: tr })}
-                  </span>
-                )}
-              </div>
+                : <span className="text-xs text-slate-700">—</span>
+              }
             </div>
-          )}
-          {hasCheck && (
-            <div>
-              <div className="flex items-center justify-end gap-1">
-                <span className="text-[10px] text-slate-700 uppercase tracking-wider">Son Tarama</span>
-                <span className="text-[10px] text-slate-500 font-mono">
-                  {coin.lastCheckedPrice?.toLocaleString('tr-TR', { maximumFractionDigits: 4 })}
+            <div className="flex items-center justify-end gap-1 h-[14px]">
+              {hasSignal && coin.lastSignalPrice != null && (
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {coin.lastSignalPrice.toLocaleString('tr-TR', { maximumFractionDigits: 4 })}
                 </span>
-              </div>
-              <p className="text-[10px] text-slate-700">
-                {formatDistanceToNow(parseUtc(coin.lastCheckedAt!), { addSuffix: true, locale: tr })}
-              </p>
+              )}
+              {hasSignal && coin.lastSignalAt && (
+                <span className="text-[10px] text-slate-600">
+                  · {formatDistanceToNow(parseUtc(coin.lastSignalAt), { addSuffix: true, locale: tr })}
+                </span>
+              )}
             </div>
-          )}
-          {!hasSignal && !hasCheck && (
-            <span className="text-[10px] text-slate-700">Tarama bekleniyor</span>
-          )}
+          </div>
+          {/* Son Tarama — her zaman göster */}
+          <div>
+            <div className="flex items-center justify-end gap-1">
+              <span className="text-[10px] text-slate-700 uppercase tracking-wider">Son Tarama</span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {hasCheck
+                  ? coin.lastCheckedPrice?.toLocaleString('tr-TR', { maximumFractionDigits: 4 })
+                  : '—'}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-700 h-[14px]">
+              {hasCheck ? fmtUtc3(coin.lastCheckedAt, 'time') : ''}
+            </p>
+          </div>
         </div>
 
         {expanded ? <ChevronUp size={14} className="text-slate-600 shrink-0" /> : <ChevronDown size={14} className="text-slate-600 shrink-0" />}
@@ -324,6 +346,10 @@ function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
           signals={signals}
           visible={expanded}
         />
+        <p className="text-[9px] text-slate-700 leading-relaxed -mt-1">
+          AL/SAT işaretleri frontend tarafından hesaplanır ve backend ile birebir örtüşmeyebilir.
+          Backend yalnızca strateji aktifken ({fmtUtc3(activatedAt)}) mum kapanışında sinyal üretir.
+        </p>
 
         {/* Details row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -400,14 +426,122 @@ function CoinCard({ coin, timeframe, t3Period, t3VFactor, strategyId }: {
             )}
           </div>
         </div>
+
+        {/* Sinyal Analizi — filtre durumları */}
+        {analysis && (
+          <div className="bg-white/[0.03] border border-white/8 rounded-xl p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">Anlık Frontend Analizi</p>
+              <span className="text-[9px] text-slate-700 bg-white/5 border border-white/8 rounded px-1.5 py-0.5">
+                Canlı · Binance verisi
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+              {/* Sol sütun — T3 */}
+              <div>
+                <AnalysisRow
+                  label="T3 Yönü"
+                  ok={analysis.t3Up}
+                  value={analysis.t3Up ? 'Yukarı' : 'Aşağı'}
+                />
+                <AnalysisRow
+                  label="2-Bar Konfirmasyon"
+                  ok={analysis.t3Confirmation}
+                  value={analysis.t3Confirmation ? 'Onaylandı' : 'Bekleniyor'}
+                />
+                <AnalysisRow
+                  label="RSI (14)"
+                  ok={analysis.rsiOk}
+                  value={analysis.rsiValue != null ? analysis.rsiValue.toFixed(1) : undefined}
+                  enabled={filterSettings.isRsiFilterEnabled}
+                />
+              </div>
+              {/* Sağ sütun — Hacim & Rejim */}
+              <div>
+                {filterSettings.minVolumeUsdt != null && (
+                  <AnalysisRow
+                    label={`Min Hacim (${(filterSettings.minVolumeUsdt / 1000).toFixed(0)}K USDT)`}
+                    ok={analysis.volUsdtOk}
+                    value={analysis.volUsdt != null
+                      ? analysis.volUsdt >= 1_000_000
+                        ? `${(analysis.volUsdt / 1_000_000).toFixed(2)}M`
+                        : `${(analysis.volUsdt / 1000).toFixed(1)}K`
+                      : undefined
+                    }
+                  />
+                )}
+                <AnalysisRow
+                  label={`Hacim Artışı (${filterSettings.volumeSurgeMultiplier}x)`}
+                  ok={analysis.volSurgeOk}
+                  value={analysis.volSurgeRatio != null ? `${analysis.volSurgeRatio.toFixed(2)}x` : undefined}
+                  enabled={filterSettings.isVolumeSurgeFilterEnabled}
+                />
+                {filterSettings.useMarketRegimeFilter && (
+                  <AnalysisRow
+                    label="Piyasa Rejimi"
+                    ok={analysis.lastCheckedReason ? !analysis.lastCheckedReason.includes('BEAR') : null}
+                    value={analysis.lastCheckedReason?.includes('BEAR') ? 'BEAR' : analysis.lastCheckedReason ? 'BULL' : undefined}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* ─── NEDEN ALMIYOR? paneli ────────────────────────────────────
+                Frontend koşulları yeşil ama pozisyon açılmamışsa engeli öne çıkar. */}
+            {analysis.t3Up && analysis.t3Confirmation && !coin.hasOpenPosition && (
+              <div className="mt-3 pt-3 border-t border-white/5 space-y-2">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-yellow-400/80 flex items-center gap-1">
+                  <Zap size={10} /> Neden Almıyor?
+                </p>
+
+                {/* ReEntryState engeli */}
+                {coin.reEntryState !== 0 && (
+                  <div className="flex items-start gap-2 bg-yellow-500/8 border border-yellow-500/20 rounded-lg px-3 py-2">
+                    <span className="text-yellow-400 text-[11px] shrink-0 mt-0.5">⚠️</span>
+                    <div>
+                      <p className="text-yellow-300 text-[11px] font-semibold">
+                        {coin.reEntryState === 1 ? 'SAT Bekliyor' : 'AL Bekliyor'} durumu aktif — yeni alım engelleniyor
+                      </p>
+                      <p className="text-yellow-400/60 text-[10px] mt-0.5">
+                        Başlık bölümündeki "Sıfırla" butonunu kullanarak Normal'e alabilirsiniz.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Zamanlama açıklaması */}
+                <p className="text-[10px] text-slate-600 leading-relaxed">
+                  💡 <span className="text-slate-400">Anlık Frontend Analizi</span> canlı Binance verisiyle hesaplanır ve AL koşullarının şu an sağlandığını gösteriyor.
+                  <span className="text-slate-500"> Arka plan job'u her mumun kapanışında çalışır</span> — eğer backend son kararı (aşağıda) eskiyse,
+                  bir sonraki taramada koşullar tekrar değerlendirilecek ve alım gerçekleşebilir.
+                </p>
+              </div>
+            )}
+
+            {/* Backend son kararı — her zaman göster, zaman damgasıyla */}
+            {coin.lastCheckedReason && (
+              <div className="mt-2 pt-2 border-t border-white/5">
+                <div className="flex items-center justify-between gap-2 mb-0.5">
+                  <span className="text-[9px] uppercase tracking-wider text-slate-700 font-semibold">Backend Son Kararı</span>
+                  {coin.lastCheckedAt && (
+                    <span className="text-[9px] text-slate-700">
+                      {formatDistanceToNow(parseUtc(coin.lastCheckedAt), { addSuffix: true, locale: tr })}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed italic">{coin.lastCheckedReason}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
 // ─── Strategy Section ─────────────────────────────────────────────────────────
-function StrategySection({ strategy, t3Period, t3VFactor }: {
-  strategy: StrategyMonitor; t3Period: number; t3VFactor: number
+function StrategySection({ strategy }: {
+  strategy: StrategyMonitor
 }) {
   const [coinsExpanded, setCoinsExpanded] = useState(true)
   const countdown = useCountdown(strategy.timeframe)
@@ -463,7 +597,22 @@ function StrategySection({ strategy, t3Period, t3VFactor }: {
       {coinsExpanded && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 items-start">
           {strategy.coins.map(coin => (
-            <CoinCard key={coin.coinId} coin={coin} timeframe={strategy.timeframe} t3Period={t3Period} t3VFactor={t3VFactor} strategyId={strategy.strategyId} />
+            <CoinCard
+              key={coin.coinId}
+              coin={coin}
+              timeframe={strategy.timeframe}
+              t3Period={strategy.t3Period}
+              t3VFactor={strategy.t3VFactor}
+              strategyId={strategy.strategyId}
+              activatedAt={strategy.activatedAt}
+              filterSettings={{
+                isRsiFilterEnabled: strategy.isRsiFilterEnabled,
+                minVolumeUsdt: strategy.minVolumeUsdt,
+                isVolumeSurgeFilterEnabled: strategy.isVolumeSurgeFilterEnabled,
+                volumeSurgeMultiplier: strategy.volumeSurgeMultiplier,
+                useMarketRegimeFilter: strategy.useMarketRegimeFilter,
+              }}
+            />
           ))}
         </div>
       )}
@@ -509,28 +658,6 @@ export default function MonitorPage() {
     refetchInterval: 30_000,
   })
 
-  // Fetch user's T3 indicator settings (period, vFactor)
-  const { data: indicators } = useQuery({
-    queryKey: ['indicators'],
-    queryFn: () => indicatorsApi.list(),
-    staleTime: 5 * 60_000,
-  })
-
-  const t3Settings = useMemo(() => {
-    const t3 = indicators?.find(ind =>
-      ind.name.toLowerCase().includes('t3') ||
-      ind.name.toLowerCase().includes('tillson') ||
-      ind.displayName.toLowerCase().includes('t3')
-    )
-    if (!t3) return { period: 3, vFactor: 0.7 }
-    const period = Number(t3.parameters.find(p => p.parameterKey.toLowerCase() === 'period')?.value ?? 3)
-    const vFactor = Number(t3.parameters.find(p =>
-      p.parameterKey.toLowerCase().includes('factor') ||
-      p.parameterKey.toLowerCase() === 'vfactor' ||
-      p.parameterKey.toLowerCase() === 'v'
-    )?.value ?? 0.7)
-    return { period: isNaN(period) ? 3 : period, vFactor: isNaN(vFactor) ? 0.7 : vFactor }
-  }, [indicators])
 
   return (
     <>
@@ -541,7 +668,7 @@ export default function MonitorPage() {
           <div className="flex items-center gap-2">
             <Zap size={14} className="text-yellow-400" />
             <p className="text-xs text-slate-500">
-              OHLCV Binance'den · Sarı çizgi T3 (periyot {t3Settings.period}) · Oklar AL/SAT sinyalleri
+              OHLCV Binance'den · Sarı çizgi T3 (backend periyotu) · Oklar AL/SAT sinyalleri
             </p>
           </div>
           <button
@@ -574,8 +701,6 @@ export default function MonitorPage() {
               <StrategySection
                 key={strategy.strategyId}
                 strategy={strategy}
-                t3Period={t3Settings.period}
-                t3VFactor={t3Settings.vFactor}
               />
             ))}
           </>

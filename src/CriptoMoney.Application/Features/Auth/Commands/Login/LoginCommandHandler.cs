@@ -1,6 +1,7 @@
 using CriptoMoney.Application.Common.Email;
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Common.Models;
+using CriptoMoney.Application.Common.Security;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -27,6 +28,12 @@ public class LoginCommandHandler(
 
         if (!user.IsEmailVerified)
             return Result<LoginResponse>.Failure("E-posta adresiniz doğrulanmamış. Lütfen e-posta kutunuzu kontrol edin.");
+
+        if (!user.IsApprovedByAdmin)
+            return Result<LoginResponse>.Failure("Hesabınız henüz yönetici tarafından onaylanmamış. Onay sonrası e-posta ile bilgilendirileceksiniz.");
+
+        if (!user.IsActive)
+            return Result<LoginResponse>.Failure("Hesabınız askıya alınmıştır. Destek için lütfen yönetici ile iletişime geçin.");
 
         var sysConfig = await db.SystemConfigs.FirstOrDefaultAsync(cancellationToken);
         var requireOtp = (sysConfig?.RequireLoginOtp ?? false) && !user.SkipLoginOtp;
@@ -57,7 +64,7 @@ public class LoginCommandHandler(
     {
         var accessToken = jwtService.GenerateAccessToken(user);
         var refreshToken = jwtService.GenerateRefreshToken();
-        user.RefreshToken = refreshToken;
+        user.RefreshToken = TokenHasher.Hash(refreshToken); // DB'de hash tutulur, ham token sadece istemciye gider
         user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(30);
         user.LastLoginAt = DateTime.UtcNow;
         user.LoginOtpCode = null;

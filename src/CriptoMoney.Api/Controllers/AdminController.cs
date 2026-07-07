@@ -1,3 +1,4 @@
+using CriptoMoney.Application.Common.Email;
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Features.Admin.Commands.SetUserRole;
 using CriptoMoney.Application.Features.Admin.Commands.SoftDeleteUser;
@@ -62,6 +63,90 @@ public class AdminController(IMediator mediator, IApplicationDbContext db) : Con
     {
         var result = await mediator.Send(new SoftDeleteUserCommand(userId, Restore: true), ct);
         return result.Succeeded ? NoContent() : BadRequest(result);
+    }
+
+    [HttpPost("users/{userId:guid}/approve")]
+    public async Task<IActionResult> ApproveUser(Guid userId, [FromServices] IEmailService emailService, CancellationToken ct)
+    {
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null) return NotFound(new { errors = new[] { "Kullanıcı bulunamadı." } });
+
+        user.IsApprovedByAdmin = true;
+        await db.SaveChangesAsync(ct);
+
+        try
+        {
+            await emailService.SendAsync(user.Email,
+                "Nexxbit — Hesabınız Onaylandı",
+                EmailTemplates.AccountApproved(user.FirstName),
+                ct);
+        }
+        catch { /* mail kritik değil */ }
+
+        return NoContent();
+    }
+
+    [HttpPost("users/{userId:guid}/suspend")]
+    public async Task<IActionResult> SuspendUser(Guid userId, CancellationToken ct)
+    {
+        if (userId == CurrentUserId) return BadRequest(new { errors = new[] { "Kendi hesabınızı askıya alamazsınız." } });
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null) return NotFound(new { errors = new[] { "Kullanıcı bulunamadı." } });
+        user.IsActive = false;
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPost("users/{userId:guid}/unsuspend")]
+    public async Task<IActionResult> UnsuspendUser(Guid userId, CancellationToken ct)
+    {
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null) return NotFound(new { errors = new[] { "Kullanıcı bulunamadı." } });
+        user.IsActive = true;
+        user.IsDeleted = false;
+        user.DeletedAt = null;
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpDelete("users/{userId:guid}/purge")]
+    public async Task<IActionResult> PurgeUser(Guid userId, CancellationToken ct)
+    {
+        if (userId == CurrentUserId) return BadRequest(new { errors = new[] { "Kendi hesabınızı silemezsiniz." } });
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null) return NotFound(new { errors = new[] { "Kullanıcı bulunamadı." } });
+
+        // EF Core ExecuteDeleteAsync — SQL injection riski yok, parametre binding güvenli
+        await db.Notifications.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.BalanceSnapshots.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.ApiRequestLogs.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+
+        var strategyIds = await db.UserStrategies.IgnoreQueryFilters()
+            .Where(s => s.UserId == userId).Select(s => s.Id).ToListAsync(ct);
+        if (strategyIds.Count > 0)
+            await db.UserStrategyCoins.IgnoreQueryFilters()
+                .Where(sc => strategyIds.Contains(sc.UserStrategyId)).ExecuteDeleteAsync(ct);
+
+        var backtestIds = await db.BacktestRuns.IgnoreQueryFilters()
+            .Where(b => b.UserId == userId).Select(b => b.Id).ToListAsync(ct);
+        if (backtestIds.Count > 0)
+            await db.BacktestTrades.IgnoreQueryFilters()
+                .Where(bt => backtestIds.Contains(bt.BacktestRunId)).ExecuteDeleteAsync(ct);
+        await db.BacktestRuns.IgnoreQueryFilters().Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+
+        await db.TradeOrders.IgnoreQueryFilters().Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.Positions.IgnoreQueryFilters().Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.TradeSignals.IgnoreQueryFilters().Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.UserStrategies.IgnoreQueryFilters().Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.UserIndicatorSubscriptions.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.UserIndicatorSettings.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.UserWatchlists.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.UserRiskSettings.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.UserBinanceAccounts.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+        await db.SystemLogs.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
+
+        await db.Users.IgnoreQueryFilters().Where(u => u.Id == userId).ExecuteDeleteAsync(ct);
+        return NoContent();
     }
 
     [HttpPut("users/{userId:guid}/credentials")]

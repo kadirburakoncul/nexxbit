@@ -61,6 +61,19 @@ public static class EmailTemplates
         return Wrap("Flash Crash Uyarısı", body);
     }
 
+    public static string TradeError(string firstName, string symbol, string strategyName, string reason)
+    {
+        var body =
+            $"<h2>⚠️ Canlı Al-Sat Durduruldu</h2>" +
+            $"<p>Merhaba <strong>{firstName}</strong>, strateji hatası nedeniyle gerçek işlem otomatik durduruldu.</p>" +
+            $"<div class=\"metric\"><span>Coin</span><strong>{symbol}</strong></div>" +
+            $"<div class=\"metric\"><span>Strateji</span><strong>{strategyName}</strong></div>" +
+            $"<div class=\"metric\"><span>Hata</span><strong class=\"negative\">{reason}</strong></div>" +
+            "<p>Strateji sayfasından API anahtarınızı kontrol edip gerçek işlemi yeniden etkinleştirebilirsiniz.</p>";
+
+        return Wrap("Canlı Al-Sat Durduruldu", body);
+    }
+
     public static string OrderFilled(
         string firstName, string symbol, string side, decimal qty, decimal price, decimal total)
     {

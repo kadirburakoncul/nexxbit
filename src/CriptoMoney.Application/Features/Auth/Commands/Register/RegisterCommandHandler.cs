@@ -1,6 +1,7 @@
 using CriptoMoney.Application.Common.Email;
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Common.Models;
+using CriptoMoney.Application.Common.Security;
 using CriptoMoney.Domain.Entities;
 using CriptoMoney.Domain.Enums;
 using MediatR;
@@ -31,7 +32,7 @@ public class RegisterCommandHandler(
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(),
             Role = UserRole.User,
-            EmailVerifyToken = verifyToken,
+            EmailVerifyToken = TokenHasher.Hash(verifyToken), // DB'de hash tutulur, ham token sadece e-postaya gider
             EmailVerifyTokenExpiry = DateTime.UtcNow.AddHours(24),
         };
 
@@ -60,14 +61,14 @@ public class RegisterCommandHandler(
             {
                 UserId = admin.Id,
                 Type = NotificationType.System,
-                Title = "Yeni Üye Kaydoldu",
-                Body = $"{user.FullName} ({user.Email}) platforma kaydoldu.",
+                Title = "Yeni Üye — Onay Bekliyor",
+                Body = $"{user.FullName} ({user.Email}) platforma kaydoldu. Hesabı aktifleştirmek için onay verin.",
             });
 
             try
             {
                 await emailService.SendAsync(admin.Email,
-                    "Nexxbit — Yeni Üye Kaydı",
+                    "Nexxbit — Yeni Üye Onay Bekliyor",
                     EmailTemplates.NewUserRegistered(admin.FirstName, user.FullName, user.Email, DateTime.UtcNow),
                     cancellationToken);
             }

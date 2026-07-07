@@ -13,7 +13,10 @@ const schema = z.object({
   email: z.string().email('Geçerli e-posta giriniz'),
   password: z.string()
     .min(8, 'En az 8 karakter olmalı')
-    .regex(/[A-Z]/, 'En az 1 büyük harf içermeli'),
+    .max(128, 'En fazla 128 karakter olabilir')
+    .regex(/[A-Z]/, 'En az 1 büyük harf içermeli')
+    .regex(/[a-z]/, 'En az 1 küçük harf içermeli')
+    .regex(/[0-9]/, 'En az 1 rakam içermeli'),
   confirmPassword: z.string(),
 }).refine(d => d.password === d.confirmPassword, {
   message: 'Şifreler eşleşmiyor',

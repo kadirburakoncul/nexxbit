@@ -49,6 +49,17 @@ export interface SignalRecord {
   strategyId: string | null
   strategyName: string | null
   strategyIsActive: boolean | null
+  peakPrice: number | null
+  peakPnlPct: number | null
+  peakPriceAt: string | null
+  troughPrice: number | null
+  troughPnlPct: number | null
+  troughPriceAt: string | null
+  stopLossPrice: number | null
+  takeProfitPrice: number | null
+  trailingStopPct: number | null
+  isPartialTpHit: boolean
+  partialRealizedPnlPct: number | null
 }
 
 export interface SignalStats {
@@ -105,6 +116,17 @@ export const signalRecordsApi = {
         strategyId: p.strategyId ?? null,
         strategyName: p.strategyName ?? null,
         strategyIsActive: p.strategyIsActive ?? null,
+        peakPrice: p.peakPrice ?? null,
+        peakPnlPct: p.peakPnlPct ?? null,
+        peakPriceAt: p.peakPriceAt ?? null,
+        troughPrice: p.troughPrice ?? null,
+        troughPnlPct: p.troughPnlPct ?? null,
+        troughPriceAt: p.troughPriceAt ?? null,
+        stopLossPrice: p.stopLossPrice ?? null,
+        takeProfitPrice: p.takeProfitPrice ?? null,
+        trailingStopPct: p.trailingStopPct ?? null,
+        isPartialTpHit: p.isPartialTpHit ?? false,
+        partialRealizedPnlPct: p.partialRealizedPnlPct ?? null,
       } satisfies SignalRecord))),
 
   stats: () =>

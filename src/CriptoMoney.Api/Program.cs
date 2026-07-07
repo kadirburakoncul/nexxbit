@@ -142,12 +142,16 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// CORS
+// CORS — sadece https:// originler (http:// güvensiz)
+var allowedOrigins = builder.Environment.IsDevelopment()
+    ? new[] { "http://localhost:3000", "http://localhost:5173" }
+    : new[] { "https://nexxbit.com.tr", "https://www.nexxbit.com.tr", "https://app.nexxbit.com.tr" };
+
 builder.Services.AddCors(opts =>
     opts.AddDefaultPolicy(policy =>
-        policy.WithOrigins("http://localhost:3000", "https://nexxbit.com.tr", "https://www.nexxbit.com.tr", "http://nexxbit.com.tr", "http://www.nexxbit.com.tr")
-              .AllowAnyHeader()
-              .AllowAnyMethod()
+        policy.WithOrigins(allowedOrigins)
+              .WithHeaders("Authorization", "Content-Type", "Accept", "X-Requested-With")
+              .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
               .AllowCredentials()));
 
 // SignalR
@@ -199,8 +203,20 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+if (!app.Environment.IsDevelopment())
+    app.UseHsts();
+
 app.UseHttpsRedirection();
 app.UseCors();
+
+// Temel güvenlik header'ları (nginx zaten ekliyor ama uygulama da bağımsız garanti versin)
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    ctx.Response.Headers.Append("X-Frame-Options", "DENY");
+    ctx.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
+    await next();
+});
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -219,7 +235,8 @@ Serilog.Log.Logger = new Serilog.LoggerConfiguration()
     .WriteTo.Sink(new SignalRLogSink(logHubCtx))
     .CreateLogger();
 
-// Health check endpoints
+// Health check endpoints — kimlik doğrulama gerektirmez (uptime monitor için), bu yüzden
+// iç hata mesajlarını (DB/migration exception detayları) public yanıta hiç koymuyoruz.
 app.MapHealthChecks("/health", new HealthCheckOptions
 {
     ResponseWriter = async (ctx, report) =>
@@ -233,7 +250,6 @@ app.MapHealthChecks("/health", new HealthCheckOptions
             {
                 name = e.Key,
                 status = e.Value.Status.ToString(),
-                description = e.Value.Description,
                 duration = e.Value.Duration.TotalMilliseconds
             })
         });
@@ -245,14 +261,14 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
     Predicate = _ => false  // Sadece uygulama ayakta mı?
 });
 
-// Hangfire Dashboard (sadece development)
-if (app.Environment.IsDevelopment())
+// Hangfire Dashboard — development'ta açık, production'da admin JWT zorunlu
+app.UseHangfireDashboard("/hangfire", new DashboardOptions
 {
-    app.UseHangfireDashboard("/hangfire", new DashboardOptions
-    {
-        Authorization = [] // Dev'de auth yok — prod'da mutlaka kısıtla
-    });
-}
+    Authorization = app.Environment.IsDevelopment()
+        ? []
+        : [new CriptoMoney.API.Middleware.HangfireAdminAuthFilter()],
+    DashboardTitle = "Nexxbit — Hangfire"
+});
 
 // Hangfire recurring job'larını kaydet
 try

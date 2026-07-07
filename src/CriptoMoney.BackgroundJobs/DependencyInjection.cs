@@ -56,6 +56,7 @@ public static class DependencyInjection
         services.AddScoped<BacktestJob>();
         services.AddScoped<BalanceSnapshotJob>();
         services.AddScoped<DailyReportJob>();
+        services.AddScoped<BistSignalScanJob>();
         services.AddScoped<IBacktestJobScheduler, HangfireBacktestJobScheduler>();
 
         return services;
@@ -80,6 +81,14 @@ public static class DependencyInjection
             "daily-report",
             job => job.ExecuteAsync(CancellationToken.None),
             "0 8 * * *",
+            new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+
+        // BIST seansı 10:00-18:10 TRT = 07:00-15:10 UTC — geniş bir pencerede 10dk'da bir dener,
+        // job kendi içinde tam seans saatini kontrol eder.
+        manager.AddOrUpdate<BistSignalScanJob>(
+            "bist-signal-scan",
+            job => job.ExecuteAsync(CancellationToken.None),
+            "*/10 6-15 * * 1-5",
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     }
 }

@@ -30,6 +30,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<ApiRequestLog> ApiRequestLogs => Set<ApiRequestLog>();
     public DbSet<SystemConfig> SystemConfigs => Set<SystemConfig>();
+    public DbSet<BistStock> BistStocks => Set<BistStock>();
+    public DbSet<BistSignal> BistSignals => Set<BistSignal>();
+    public DbSet<BistIndicatorSetting> BistIndicatorSettings => Set<BistIndicatorSetting>();
+    public DbSet<BistStrategy> BistStrategies => Set<BistStrategy>();
+    public DbSet<BistStrategyStock> BistStrategyStocks => Set<BistStrategyStock>();
+    public DbSet<BistWatchlistItem> BistWatchlistItems => Set<BistWatchlistItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

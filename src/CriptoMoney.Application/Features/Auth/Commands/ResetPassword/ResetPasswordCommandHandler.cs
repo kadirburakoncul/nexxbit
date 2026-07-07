@@ -1,5 +1,6 @@
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Application.Common.Models;
+using CriptoMoney.Application.Common.Security;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,8 +11,9 @@ public class ResetPasswordCommandHandler(IApplicationDbContext db, IPasswordHash
 {
     public async Task<Result> Handle(ResetPasswordCommand request, CancellationToken cancellationToken)
     {
+        var hashedToken = TokenHasher.Hash(request.Token);
         var user = await db.Users
-            .FirstOrDefaultAsync(u => u.PasswordResetToken == request.Token && !u.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(u => u.PasswordResetToken == hashedToken && !u.IsDeleted, cancellationToken);
 
         if (user is null)
             return Result.Failure("Geçersiz veya kullanılmış sıfırlama bağlantısı.");

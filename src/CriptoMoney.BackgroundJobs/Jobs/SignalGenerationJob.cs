@@ -84,6 +84,26 @@ public class SignalGenerationJob(
 
             // Momentum fresh-entry filtresi: sadece son N dakikada listeye giren coinler
             var allSymbols = gainers.Select(g => g.Symbol).ToList();
+
+            // Volatile cleanup: güncel gainers listesinde olmayan ve 30dk'dır taranmayan coinleri temizle
+            // Böylece monitör sadece aktif coinleri gösterir, geçmiş birikimi değil.
+            var allSymbolSet   = new HashSet<string>(allSymbols, StringComparer.OrdinalIgnoreCase);
+            var cleanupCutoff  = DateTime.UtcNow.AddMinutes(-30);
+            var candidates     = await db.UserStrategyCoins
+                .Include(sc => sc.Coin)
+                .Where(sc => sc.UserStrategyId == strategy.Id
+                          && (sc.LastCheckedAt == null || sc.LastCheckedAt < cleanupCutoff))
+                .ToListAsync(ct);
+            var staleCoins = candidates
+                .Where(sc => !allSymbolSet.Contains(sc.Coin?.Symbol ?? ""))
+                .ToList();
+            if (staleCoins.Count > 0)
+            {
+                db.UserStrategyCoins.RemoveRange(staleCoins);
+                await db.SaveChangesAsync(ct);
+                logger.LogDebug("Volatile cleanup: {Count} eski coin kaldırıldı.", staleCoins.Count);
+            }
+
             var freshSymbols = momentumTracker.UpdateAndFilter(
                 userId, strategy.Id, allSymbols, strategy.MomentumFreshFilterMinutes);
 
@@ -91,6 +111,10 @@ public class SignalGenerationJob(
                 logger.LogInformation(
                     "Volatile fresh filtre: {Total} gainer → {Fresh} yeni giren (son {Min}dk). UserId={UserId}",
                     allSymbols.Count, freshSymbols.Count, strategy.MomentumFreshFilterMinutes, userId);
+
+            // MomentumDropped kapanmaları devre dışı — çok erken 0% çıkış üretiyordu.
+            // Çıkış artık yalnızca TrailingStop / StopLoss / T3-SAT ile olur.
+            // await CloseDroppedMomentumPositionsAsync(userId, strategy.Id, allSymbols, ct);
 
             var symbols = freshSymbols.Select(s => s).ToList();
             if (symbols.Count == 0)
@@ -129,9 +153,14 @@ public class SignalGenerationJob(
                     newCoins.Count, string.Join(", ", newCoins.Select(c => c.Symbol)));
             }
 
-            // Tüm eşleşen coinleri birleştir (eski + yeni oluşturulanlar)
+            // Gainers sıralamasını koru: en yüksek %değişim önce (5 slot için en güçlü momentum öncelikli)
+            var gainersRank = gainers
+                .Select((g, i) => (g.Symbol, Rank: i))
+                .ToDictionary(x => x.Symbol, x => x.Rank, StringComparer.OrdinalIgnoreCase);
+
             var dbCoins = existingCoins
                 .Concat(newCoins.Select(c => new { c.Id, c.Symbol }))
+                .OrderBy(c => gainersRank.TryGetValue(c.Symbol, out var r) ? r : int.MaxValue)
                 .ToList();
 
             logger.LogInformation("Volatile mod: {GainerCount} gainer (min%{Min}), {DbCount} işlenecek. UserId={UserId} TF={TF}",
@@ -159,15 +188,14 @@ public class SignalGenerationJob(
     private async Task CloseDroppedMomentumPositionsAsync(
         Guid userId, Guid strategyId, List<string> currentMomentumSymbols, CancellationToken ct)
     {
-        var symbolSet = new HashSet<string>(currentMomentumSymbols);
+        var symbolSet = new HashSet<string>(currentMomentumSymbols, StringComparer.OrdinalIgnoreCase);
 
-        // Bu volatile stratejiye ait açık sanal pozisyonlar
+        // Bu volatile stratejiye ait açık pozisyonlar (sanal + gerçek)
         var openPositions = await db.Positions
             .Include(p => p.Coin)
             .Where(p => p.UserId == userId
                      && p.StrategyId == strategyId
-                     && p.Status == CriptoMoney.Domain.Enums.PositionStatus.Open
-                     && p.IsVirtual)
+                     && p.Status == CriptoMoney.Domain.Enums.PositionStatus.Open)
             .ToListAsync(ct);
 
         var dropped = openPositions
@@ -178,22 +206,31 @@ public class SignalGenerationJob(
 
         foreach (var pos in dropped)
         {
-            pos.Status = CriptoMoney.Domain.Enums.PositionStatus.Closed;
-            pos.ClosedAt = DateTime.UtcNow;
+            // LastCheckedPrice'ı kapanış fiyatı olarak kullan (mevcut fiyata en yakın)
+            var strategyCoin = await db.UserStrategyCoins
+                .FirstOrDefaultAsync(sc => sc.UserStrategyId == strategyId && sc.CoinId == pos.CoinId, ct);
+            var closePrice = strategyCoin?.LastCheckedPrice ?? pos.EntryPrice;
+
+            pos.Status     = CriptoMoney.Domain.Enums.PositionStatus.Closed;
+            pos.ClosedAt   = DateTime.UtcNow;
+            pos.ClosePrice = closePrice;
             pos.CloseReason = "Momentum listesinden çıktı";
 
             if (pos.EntryPrice > 0)
             {
-                // Güncel fiyat almadan entry fiyatı üzerinden kapat (pozisyon gerçek değil)
-                pos.RealizedPnlPct = 0;
+                pos.RealizedPnlPct = Math.Round((closePrice - pos.EntryPrice) / pos.EntryPrice * 100m, 4);
+                pos.CloseValueUsdt = pos.EntryValueUsdt > 0
+                    ? Math.Round(pos.EntryValueUsdt * (1m + pos.RealizedPnlPct.Value / 100m), 4)
+                    : Math.Round(closePrice * pos.EntryQuantity, 4);
+                pos.RealizedPnl = Math.Round((pos.CloseValueUsdt ?? 0m) - pos.EntryValueUsdt, 4);
             }
 
-            logger.LogInformation("Volatile: Momentum dışı sanal pozisyon kapatıldı: {Symbol} StrategyId={SId}",
-                pos.Coin!.Symbol, strategyId);
+            logger.LogInformation(
+                "Volatile: Momentum dışı pozisyon kapatıldı: {Symbol} IsVirtual={V} P&L%={Pnl:F4} P&L$={PnlUsdt:F2}",
+                pos.Coin!.Symbol, pos.IsVirtual, pos.RealizedPnlPct, pos.RealizedPnl);
         }
 
-        if (dropped.Count > 0)
-            await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     private static bool ShouldRunForTimeframe(string timeframe, DateTime utcNow) => timeframe switch

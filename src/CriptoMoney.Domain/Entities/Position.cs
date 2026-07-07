@@ -26,6 +26,12 @@ public class Position : BaseEntity
     public bool IsPartialTpHit { get; set; } = false;
     public decimal? PartialTpHitPrice { get; set; }
     public decimal? PartialRealizedPnlPct { get; set; }
+    public decimal? PeakPrice { get; set; }
+    public decimal? PeakPnlPct { get; set; }
+    public DateTime? PeakPriceAt { get; set; }
+    public decimal? TroughPrice { get; set; }
+    public decimal? TroughPnlPct { get; set; }
+    public DateTime? TroughPriceAt { get; set; }
     public DateTime OpenedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ClosedAt { get; set; }
     public string? CloseReason { get; set; }
