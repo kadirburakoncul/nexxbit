@@ -8,7 +8,7 @@ import { client } from '@/api/client'
 import { coinsApi } from '@/api/coins'
 import { binanceApi } from '@/api/binance'
 import { useState, useEffect } from 'react'
-import { ShieldX, ShieldCheck, X, Wifi, WifiOff, Gauge, Zap, Search, Check, ChevronDown, ChevronUp, Send, AlertTriangle, KeyRound, Sun, Moon, Globe } from 'lucide-react'
+import { ShieldX, ShieldCheck, X, Wifi, WifiOff, Zap, Search, Check, ChevronDown, ChevronUp, Send, AlertTriangle, KeyRound, Sun, Moon, Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import { useThemeStore } from '@/stores/themeStore'
@@ -37,10 +37,6 @@ interface RiskSettings {
 }
 
 const schema = z.object({
-  maxOpenPositions: z.coerce.number().int().min(1).max(50),
-  maxPositionSizeUsdt: z.coerce.number().min(1).nullable().optional(),
-  maxPositionSizePct: z.coerce.number().min(1).max(100).nullable().optional(),
-  maxDailyLossUsdt: z.coerce.number().min(0).nullable().optional(),
   flashCrashProtectionEnabled: z.boolean(),
   flashCrashDropPct: z.coerce.number().min(0.5).max(50),
   flashCrashWindowMinutes: z.coerce.number().int().min(1),
@@ -96,6 +92,10 @@ export default function SettingsPage() {
       ...d,
       tradeMode: data?.tradeMode ?? 2,
       isAutoTradeEnabled: d.flashCrashProtectionEnabled,
+      maxOpenPositions: data?.maxOpenPositions ?? 5,
+      maxPositionSizeUsdt: data?.maxPositionSizeUsdt ?? null,
+      maxPositionSizePct: data?.maxPositionSizePct ?? null,
+      maxDailyLossUsdt: data?.maxDailyLossUsdt ?? null,
       maxDailyLossPct: data?.maxDailyLossPct ?? null,
       defaultStopLossPct: data?.defaultStopLossPct ?? null,
       defaultTakeProfitPct: data?.defaultTakeProfitPct ?? null,
@@ -176,25 +176,6 @@ export default function SettingsPage() {
         </div>
 
         <form onSubmit={handleSubmit(d => save.mutate(d as any))} className="space-y-3">
-
-          {/* Position Limits */}
-          <Section icon={<Gauge size={15} />} title="Pozisyon Limitleri">
-            <p className="text-xs text-slate-500 -mt-1">Otomatik açılan gerçek işlemlerin boyutunu ve sayısını sınırlayan genel güvenlik ayarları.</p>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Maks. Açık Pozisyon" error={errors.maxOpenPositions?.message} hint="Aynı anda açık olabilecek gerçek pozisyon sayısının üst sınırı. Bu sayıya ulaşılınca yeni AL sinyalleri işleme alınmaz.">
-                <input {...register('maxOpenPositions')} type="number" min="1" className={inputCls} />
-              </Field>
-              <Field label="Maks. İşlem Tutarı (USDT)" error={errors.maxPositionSizeUsdt?.message} hint="Tek bir işlemde kullanılacak sabit USDT tutarı. Doldurursanız aşağıdaki yüzde alanı yoksayılır.">
-                <input {...register('maxPositionSizeUsdt', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })} type="number" step="1" placeholder="Boş = % kullan" className={inputCls} />
-              </Field>
-              <Field label="Maks. İşlem Tutarı (% Bakiye)" error={errors.maxPositionSizePct?.message} hint="Her işlemde USDT bakiyenizin yüzde kaçının kullanılacağı. Tutar alanı boşsa bu kullanılır; ikisi de boşsa varsayılan %20 uygulanır.">
-                <input {...register('maxPositionSizePct', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })} type="number" step="1" placeholder="Ör: 20" className={inputCls} />
-              </Field>
-              <Field label="Günlük Maks. Zarar (USDT)" error={errors.maxDailyLossUsdt?.message} hint="Bir günde bu kadar USDT zarara ulaşılınca, o gün için yeni otomatik işlem açılmaz. Ertesi gün otomatik sıfırlanır.">
-                <input {...register('maxDailyLossUsdt', { setValueAs: v => (v === '' || v == null) ? null : Number(v) })} type="number" step="1" placeholder="Boş = sınırsız" className={inputCls} />
-              </Field>
-            </div>
-          </Section>
 
           {/* Flash Crash */}
           <Section icon={<Zap size={15} />} title="Flash Crash Koruması">
