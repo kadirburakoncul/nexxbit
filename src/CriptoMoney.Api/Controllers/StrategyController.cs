@@ -216,7 +216,11 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
             req.UseAdxFilter, req.AdxPeriod, req.AdxMinValue,
             req.UseMacdFilter,
             req.UseBreakevenStop, req.BreakevenTriggerPct,
-            req.TrailingActivationPct);
+            req.TrailingActivationPct,
+            req.RsiMaxValue,
+            req.UseHigherTfConfirm, req.HigherTimeframe,
+            req.UseRiskBasedSizing, req.RiskPerTradePct,
+            req.MaxConsecutiveLosses, req.PauseOnDrawdownPct);
 }
 
 public class UpsertStrategyRequest
@@ -227,6 +231,13 @@ public class UpsertStrategyRequest
     public string Timeframe { get; set; } = "1h";
     public decimal TrailingStopPct { get; set; }
     public decimal TrailingActivationPct { get; set; } = 1.0m;
+    public decimal RsiMaxValue { get; set; } = 75m;
+    public bool UseHigherTfConfirm { get; set; } = false;
+    public string HigherTimeframe { get; set; } = "1h";
+    public bool UseRiskBasedSizing { get; set; } = false;
+    public decimal RiskPerTradePct { get; set; } = 1.0m;
+    public int MaxConsecutiveLosses { get; set; } = 5;
+    public decimal PauseOnDrawdownPct { get; set; } = 15m;
     public decimal StopLossPct { get; set; }
     public decimal? TakeProfitPct { get; set; }
     public decimal? MinVolumeUsdt { get; set; }

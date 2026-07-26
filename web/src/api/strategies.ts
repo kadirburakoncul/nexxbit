@@ -15,6 +15,13 @@ export interface Strategy {
   timeframe: string
   trailingStopPct: number
   trailingActivationPct: number
+  rsiMaxValue: number
+  useHigherTfConfirm: boolean
+  higherTimeframe: string
+  useRiskBasedSizing: boolean
+  riskPerTradePct: number
+  maxConsecutiveLosses: number
+  pauseOnDrawdownPct: number
   stopLossPct: number
   takeProfitPct: number | null
   minVolumeUsdt: number | null
@@ -60,6 +67,13 @@ export interface UpsertStrategyRequest {
   timeframe: string
   trailingStopPct: number
   trailingActivationPct: number
+  rsiMaxValue: number
+  useHigherTfConfirm: boolean
+  higherTimeframe: string
+  useRiskBasedSizing: boolean
+  riskPerTradePct: number
+  maxConsecutiveLosses: number
+  pauseOnDrawdownPct: number
   stopLossPct: number
   takeProfitPct: number | null
   minVolumeUsdt: number | null

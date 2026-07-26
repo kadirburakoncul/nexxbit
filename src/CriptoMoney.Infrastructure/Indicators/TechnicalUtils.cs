@@ -54,12 +54,24 @@ public static class TechnicalUtils
 
     /// <summary>
     /// Wilder ADX — Average Directional Index.
-    /// Returns last ADX value (0–100). Values above 25 indicate trending market.
+    /// Sadece ADX değerini döndürür (geriye dönük uyumluluk).
+    /// YÖN bilgisi gerekiyorsa <see cref="ComputeAdxFull"/> kullanın: ADX trendin
+    /// GÜCÜNÜ ölçer, YÖNÜNÜ değil — sert düşüşte de ADX yüksektir.
     /// </summary>
     public static decimal ComputeAdx(IReadOnlyList<CandleInput> candles, int period = 14)
+        => ComputeAdxFull(candles, period).adx;
+
+    /// <summary>
+    /// Wilder ADX + yön göstergeleri.
+    /// adx: trend gücü (0–100, 25+ = trend var)
+    /// plusDi &gt; minusDi ise trend YUKARI, tersi ise AŞAĞI.
+    /// AL sinyalinde her ikisi de kontrol edilmelidir.
+    /// </summary>
+    public static (decimal adx, decimal plusDi, decimal minusDi) ComputeAdxFull(
+        IReadOnlyList<CandleInput> candles, int period = 14)
     {
         int n = candles.Count;
-        if (n < period * 2 + 2) return 0m;
+        if (n < period * 2 + 2) return (0m, 0m, 0m);
 
         var plusDm  = new decimal[n];
         var minusDm = new decimal[n];
@@ -88,7 +100,8 @@ public static class TechnicalUtils
         }
 
         var adxSmooth = 0m;
-        decimal? prevAdx = null;
+        var dxSeed = new List<decimal>(period);
+        decimal lastPlusDi = 0m, lastMinusDi = 0m;
 
         for (int i = period + 1; i < n; i++)
         {
@@ -96,22 +109,31 @@ public static class TechnicalUtils
             plusSmooth  = plusSmooth  - plusSmooth  / period + plusDm[i];
             minusSmooth = minusSmooth - minusSmooth / period + minusDm[i];
 
-            var plusDi  = trSmooth > 0 ? plusSmooth  / trSmooth * 100m : 0;
-            var minusDi = trSmooth > 0 ? minusSmooth / trSmooth * 100m : 0;
-            var dx = (plusDi + minusDi) > 0 ? Math.Abs(plusDi - minusDi) / (plusDi + minusDi) * 100m : 0;
+            lastPlusDi  = trSmooth > 0 ? plusSmooth  / trSmooth * 100m : 0;
+            lastMinusDi = trSmooth > 0 ? minusSmooth / trSmooth * 100m : 0;
+            var dx = (lastPlusDi + lastMinusDi) > 0
+                ? Math.Abs(lastPlusDi - lastMinusDi) / (lastPlusDi + lastMinusDi) * 100m
+                : 0;
 
-            if (prevAdx is null)
+            // Wilder standardı: ADX ilk `period` adet DX'in ORTALAMASIYLA başlatılır.
+            // Tek DX ile başlatmak TradingView/Binance değerlerinden sapmaya yol açıyordu.
+            if (dxSeed.Count < period)
             {
-                adxSmooth = dx;
+                dxSeed.Add(dx);
+                if (dxSeed.Count == period)
+                    adxSmooth = dxSeed.Average();
             }
             else
             {
                 adxSmooth = (adxSmooth * (period - 1) + dx) / period;
             }
-            prevAdx = adxSmooth;
         }
 
-        return Math.Round(adxSmooth, 4);
+        // Seed tamamlanmadıysa eldeki DX ortalaması en iyi tahmindir
+        if (dxSeed.Count < period && dxSeed.Count > 0)
+            adxSmooth = dxSeed.Average();
+
+        return (Math.Round(adxSmooth, 4), Math.Round(lastPlusDi, 4), Math.Round(lastMinusDi, 4));
     }
 
     /// <summary>
@@ -122,7 +144,20 @@ public static class TechnicalUtils
     public static (decimal macd, decimal signal, decimal histogram) ComputeMacd(
         decimal[] closes, int fast = 12, int slow = 26, int signalPeriod = 9)
     {
-        if (closes.Length < slow + signalPeriod) return (0, 0, 0);
+        var (m, s, h, _) = ComputeMacdFull(closes, fast, slow, signalPeriod);
+        return (m, s, h);
+    }
+
+    /// <summary>
+    /// MACD + önceki barın histogramı.
+    /// Yalnızca histogram &gt; 0 bakmak yetersizdir: 20 bardır pozitif ama KÜÇÜLEN
+    /// histogram trendin bittiğini gösterir. Momentum onayı için
+    /// histogram &gt; 0 VE histogram &gt; prevHistogram aranmalıdır.
+    /// </summary>
+    public static (decimal macd, decimal signal, decimal histogram, decimal prevHistogram) ComputeMacdFull(
+        decimal[] closes, int fast = 12, int slow = 26, int signalPeriod = 9)
+    {
+        if (closes.Length < slow + signalPeriod + 1) return (0, 0, 0, 0);
 
         var emaFast   = ComputeEma(closes, fast);
         var emaSlow   = ComputeEma(closes, slow);
@@ -136,6 +171,10 @@ public static class TechnicalUtils
 
         var lastMacd   = macdLine[^1];
         var lastSignal = signalArr[^1];
-        return (lastMacd, lastSignal, lastMacd - lastSignal);
+        var prevHist   = signalArr.Length >= 2 && macdLine.Length >= 2
+            ? macdLine[^2] - signalArr[^2]
+            : 0m;
+
+        return (lastMacd, lastSignal, lastMacd - lastSignal, prevHist);
     }
 }

@@ -222,6 +222,16 @@ public class AutoTradeService(
                 return Result.Failure("Bu coin başka bir strateji tarafından tutuluyor.");
             }
 
+            // Kill switch — ardışık zarar sonrası strateji duraklatılmışsa yeni pozisyon açma.
+            // Bozulan bir stratejinin sermayeyi tüketmesini engelleyen son savunma hattı.
+            if (strategy?.PausedUntil is DateTime pausedUntil && pausedUntil > DateTime.UtcNow)
+            {
+                logger.LogWarning(
+                    "Kill switch aktif: {StratName} {Until:HH:mm}'e kadar duraklatıldı ({Losses} ardışık zarar) — {Symbol} atlandı",
+                    strategy.Name, pausedUntil, strategy.ConsecutiveLossCount, symbol);
+                return Result.Failure($"Strateji {pausedUntil:HH:mm}'e kadar duraklatıldı (ardışık zarar koruması).");
+            }
+
             // Strateji bazlı maksimum eş zamanlı gerçek pozisyon kontrolü
             var maxRealPositions = strategy?.MaxOpenPositions ?? 5;
             var openRealCount = await db.Positions
@@ -232,7 +242,17 @@ public class AutoTradeService(
                 return Result.Failure($"Maksimum {maxRealPositions} eş zamanlı açık pozisyon sınırına ulaşıldı.");
             }
 
-            orderQty = await CalculateOrderSizeAsync(signal.UserId, risk, strategy, ct);
+            // Risk bazlı boyutlandırma için stop mesafesi (ATR varsa ondan, yoksa sabit %)
+            decimal? stopDistancePct = null;
+            if (strategy?.UseRiskBasedSizing == true)
+            {
+                var atrForSizing = ExtractAtr(signal.IndicatorScores);
+                stopDistancePct = atrForSizing > 0 && signal.Price > 0
+                    ? atrForSizing * strategy.AtrSlMultiplier / signal.Price * 100m
+                    : strategy.StopLossPct;
+            }
+
+            orderQty = await CalculateOrderSizeAsync(signal.UserId, risk, strategy, ct, stopDistancePct);
             if (orderQty <= 0)
             {
                 logger.LogWarning("Yetersiz bakiye veya geçici API hatası — emir atlandı, strateji korundu: UserId={UserId} Strateji={StratName}",
@@ -549,9 +569,31 @@ public class AutoTradeService(
     }
 
     private async Task<decimal> CalculateOrderSizeAsync(
-        Guid userId, UserRiskSettings? risk, UserStrategy? strategy, CancellationToken ct)
+        Guid userId, UserRiskSettings? risk, UserStrategy? strategy, CancellationToken ct,
+        decimal? stopDistancePct = null)
     {
         var usdtBalance = await binance.GetUsdtBalanceAsync(userId, ct);
+
+        // Risk bazlı boyutlandırma: sabit tutar yerine "her işlemde sermayenin
+        // en fazla %X'ini kaybet" mantığı. Pozisyon = risk tutarı / stop mesafesi.
+        // Volatil coinde (geniş stop) küçük, sakin coinde (dar stop) büyük pozisyon açılır —
+        // her işlemin parasal riski eşitlenir.
+        if (strategy?.UseRiskBasedSizing == true && stopDistancePct is > 0)
+        {
+            var riskPct    = strategy.RiskPerTradePct > 0 ? strategy.RiskPerTradePct : 1.0m;
+            var riskAmount = usdtBalance * riskPct / 100m;
+            var riskSize   = riskAmount / (stopDistancePct.Value / 100m);
+
+            // Üst sınır: tek pozisyon bakiyenin tamamını yutmasın
+            var cap = strategy.MaxPositionSizeUsdt ?? (usdtBalance * 0.5m);
+            riskSize = Math.Min(riskSize, cap);
+
+            logger.LogDebug(
+                "Risk bazlı boyut: bakiye={Bal:F2} risk%={R:F2} stop%={S:F2} → {Size:F2} USDT",
+                usdtBalance, riskPct, stopDistancePct.Value, riskSize);
+
+            return Math.Max(0, Math.Round(riskSize, 2));
+        }
 
         decimal size;
         // Strateji ayarı, global RiskSettings'e göre önceliklidir
@@ -608,6 +650,18 @@ public class AutoTradeService(
     /// Strateji ayarına göre SL/TP/Trailing değerlerini hesaplar.
     /// UseAtrBasedStops=true ise signal'den ATR çeker, dinamik hesap yapar.
     /// </summary>
+    /// <summary>IndicatorScores JSON'undan ATR değerini okur (yoksa 0).</summary>
+    private static decimal ExtractAtr(string? indicatorScoresJson)
+    {
+        if (string.IsNullOrEmpty(indicatorScoresJson)) return 0m;
+        try
+        {
+            var scores = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, decimal>>(indicatorScoresJson);
+            return scores is not null && scores.TryGetValue("ATR", out var atr) ? atr : 0m;
+        }
+        catch { return 0m; }
+    }
+
     private static (decimal? sl, decimal? tp, decimal? trailingPct) ComputeStops(
         decimal entryPrice, UserStrategy? strategy, string? indicatorScoresJson)
     {

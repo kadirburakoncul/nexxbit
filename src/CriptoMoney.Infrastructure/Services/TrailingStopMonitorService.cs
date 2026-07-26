@@ -158,7 +158,7 @@ public class TrailingStopMonitorService(
         {
             logger.LogWarning("Maks tutma süresi ({Max}sa) doldu: {Symbol} {Hours:F1}sa açık — zorla kapatılıyor",
                 maxHoldHours, position.Coin.Symbol, hoursOpen);
-            await ClosePositionAsync(db, binance, position, strategyCoin, currentPrice, ExitReason.MaxHoldTime, ct);
+            await ClosePositionAsync(db, binance, position, strategyCoin, currentPrice, ExitReason.MaxHoldTime, ct, strategy);
             return;
         }
 
@@ -206,7 +206,7 @@ public class TrailingStopMonitorService(
         logger.LogWarning("{Reason} tetiklendi: {Symbol} [{Type}] giriş={Entry:F6} şimdi={Now:F6}",
             exitReason, position.Coin.Symbol, position.IsVirtual ? "sanal" : "gerçek", entry, currentPrice);
 
-        await ClosePositionAsync(db, binance, position, strategyCoin, currentPrice, exitReason.Value, ct);
+        await ClosePositionAsync(db, binance, position, strategyCoin, currentPrice, exitReason.Value, ct, strategy);
     }
 
     // Fix 7: Partial TP mantığı
@@ -281,7 +281,8 @@ public class TrailingStopMonitorService(
         Domain.Entities.UserStrategyCoin? strategyCoin,
         decimal currentPrice,
         ExitReason exitReason,
-        CancellationToken ct)
+        CancellationToken ct,
+        UserStrategy? strategy = null)
     {
         // Fix 9: Double-check race condition
         if (position.Status != PositionStatus.Open) return;
@@ -359,6 +360,8 @@ public class TrailingStopMonitorService(
                     ResetDailyLossIfNeeded(riskSettings);
                     riskSettings.DailyLossUsedUsdt += Math.Abs(position.RealizedPnl.Value);
                 }
+
+                UpdateKillSwitch(strategy, position.RealizedPnl ?? 0m);
 
                 logger.LogInformation("{Reason} SELL emri: {Symbol} {Qty} coin → {USDT} USDT PnL={Pnl}",
                     exitReason, position.Coin.Symbol, coinQty, receivedUsdt, position.RealizedPnl);
@@ -447,6 +450,38 @@ public class TrailingStopMonitorService(
                 $"Giriş: <b>{entry:F6}</b> → Çıkış: <b>{currentPrice:F6}</b>\n" +
                 $"P&amp;L: <b>{pnl}</b>{partialNote}", ct);
         }
+    }
+
+    /// <summary>
+    /// Ardışık zarar sayacını günceller; eşiğe ulaşılınca stratejiyi duraklatır.
+    /// Bozulan bir stratejinin (piyasa rejimi değişti, parametreler artık uymuyor)
+    /// sermayeyi tüketmesini engelleyen son savunma hattıdır.
+    /// Kârlı işlem sayacı sıfırlar.
+    /// </summary>
+    private void UpdateKillSwitch(UserStrategy? strategy, decimal realizedPnl)
+    {
+        if (strategy is null) return;
+
+        if (realizedPnl >= 0)
+        {
+            if (strategy.ConsecutiveLossCount > 0)
+                logger.LogInformation("Kârlı işlem — ardışık zarar sayacı sıfırlandı: {Name}", strategy.Name);
+            strategy.ConsecutiveLossCount = 0;
+            return;
+        }
+
+        strategy.ConsecutiveLossCount++;
+
+        var limit = strategy.MaxConsecutiveLosses > 0 ? strategy.MaxConsecutiveLosses : 5;
+        if (strategy.ConsecutiveLossCount < limit) return;
+
+        // Duraklatma süresi: her tetiklemede aynı — kullanıcı inceleyip elle devam ettirebilir
+        strategy.PausedUntil = DateTime.UtcNow.AddHours(6);
+        strategy.ConsecutiveLossCount = 0;
+
+        logger.LogWarning(
+            "KILL SWITCH: {Name} stratejisi {Limit} ardışık zarar sonrası {Until:HH:mm}'e kadar duraklatıldı",
+            strategy.Name, limit, strategy.PausedUntil);
     }
 
     private static void ResetDailyLossIfNeeded(UserRiskSettings risk)

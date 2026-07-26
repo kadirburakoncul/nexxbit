@@ -288,6 +288,50 @@ public class BacktestEngine(
 
         // Sharpe Ratio (basit: aylık bazlı)
         run.SharpeRatio = ComputeSharpeRatio(closed);
+
+        ComputeWalkForwardSplit(run, closed);
+    }
+
+    /// <summary>
+    /// Walk-forward doğrulama: işlemler zaman sırasına göre %70 in-sample /
+    /// %30 out-of-sample olarak bölünür ve ayrı ayrı raporlanır.
+    ///
+    /// Neden gerekli: parametreleri geçmiş veriye uydurmak (overfit) kolaydır ve
+    /// tek bir toplam sonuç bunu gizler. Out-of-sample performans in-sample'dan
+    /// belirgin şekilde kötüyse strateji ezberlenmiştir, öğrenilmemiştir.
+    /// </summary>
+    private static void ComputeWalkForwardSplit(BacktestRun run, List<BacktestTrade> closed)
+    {
+        // Anlamlı bir bölme için asgari işlem sayısı
+        if (closed.Count < 20)
+        {
+            run.OutOfSampleNote = $"Walk-forward için yetersiz işlem ({closed.Count}/20)";
+            return;
+        }
+
+        var ordered = closed.OrderBy(t => t.ExitTime!.Value).ToList();
+        var splitIndex = (int)(ordered.Count * 0.7);
+
+        var inSample  = ordered.Take(splitIndex).ToList();
+        var outSample = ordered.Skip(splitIndex).ToList();
+        if (outSample.Count == 0) return;
+
+        var isPnl  = inSample.Sum(t => t.PnlUsdt ?? 0);
+        var oosPnl = outSample.Sum(t => t.PnlUsdt ?? 0);
+
+        run.InSampleNetPnlPct    = Math.Round(isPnl  / run.InitialCapital * 100, 2);
+        run.OutOfSampleNetPnlPct = Math.Round(oosPnl / run.InitialCapital * 100, 2);
+        run.OutOfSampleWinRate   = Math.Round(
+            (decimal)outSample.Count(t => t.PnlUsdt > 0) / outSample.Count * 100, 2);
+
+        // Yorumu hazır üret — kullanıcı ham sayıdan sonuç çıkarmak zorunda kalmasın
+        run.OutOfSampleNote = (run.InSampleNetPnlPct, run.OutOfSampleNetPnlPct) switch
+        {
+            ( > 0, > 0) => "Sağlam: hem in-sample hem out-of-sample kârlı.",
+            ( > 0, <= 0) => "UYARI: in-sample kârlı ama out-of-sample zararlı — parametreler geçmişe aşırı uydurulmuş olabilir (overfit).",
+            (<= 0, > 0) => "Karışık: in-sample zararlı, out-of-sample kârlı. Örneklem küçük olabilir.",
+            _ => "Strateji her iki dönemde de zararlı."
+        };
     }
 
     private static decimal[] ComputeEma200(decimal[] closes, int period)

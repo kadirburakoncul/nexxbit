@@ -53,5 +53,12 @@ public record UpsertStrategyCommand(
     // Breakeven stop
     bool UseBreakevenStop = false,
     decimal BreakevenTriggerPct = 1.5m,
-    decimal TrailingActivationPct = 1.0m
+    decimal TrailingActivationPct = 1.0m,
+    decimal RsiMaxValue = 75m,
+    bool UseHigherTfConfirm = false,
+    string HigherTimeframe = "1h",
+    bool UseRiskBasedSizing = false,
+    decimal RiskPerTradePct = 1.0m,
+    int MaxConsecutiveLosses = 5,
+    decimal PauseOnDrawdownPct = 15m
 ) : IRequest<Result<Guid>>;

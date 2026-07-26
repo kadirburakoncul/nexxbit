@@ -110,6 +110,16 @@ public class SignalEngine(
         var t3Factor = t3Params.TryGetValue("Factor", out var f)
             ? decimal.Parse(f, System.Globalization.CultureInfo.InvariantCulture) : 0.7m;
 
+        // T3 altı katmanlı EMA'dır — period*6 bardan azıyla anlamsız (sıfıra yakın) değer üretir.
+        // Eski sabit "12 mum" eşiği yeni listelenen coinlerde hatalı sinyale yol açabiliyordu.
+        var minCandlesForT3 = t3Period * 6 + 5;
+        if (candles.Count < minCandlesForT3)
+        {
+            logger.LogDebug("Yetersiz mum: CoinId={Id} {Have}/{Need} (T3 period={P})",
+                coinId, candles.Count, minCandlesForT3, t3Period);
+            return null;
+        }
+
         var src  = candles.Select(c => (c.High + c.Low + 2m * c.Close) / 4m).ToArray();
         var t3   = TillsonIndicator.ComputeT3(src, t3Period, t3Factor);
 
@@ -123,8 +133,20 @@ public class SignalEngine(
         bool t3TurnUp, t3TurnDown;
         if (strategy.IsVolatileMode)
         {
-            t3TurnUp   = t3[^2] > t3[^3];    // 1-bar: son bar T3 yukarı → daha erken giriş
-            t3TurnDown = !(t3[^2] > t3[^3]); // 1-bar: son bar T3 düştü → çıkış
+            // Volatile mod ESKİDEN 1-bar bakıyordu:
+            //   t3TurnUp = t3[^2] > t3[^3];  t3TurnDown = !t3TurnUp;
+            // Bu iki koşul birbirini dışlıyor VE biri her zaman doğru oluyordu —
+            // yani "sinyal yok, bekle" durumu hiç oluşmuyordu. Giriş şartı da
+            // "T3 önceki bardan yüksek"ten ibaretti; bu bir sinyal değil, düzleştirilmiş
+            // bir çizginin tek barlık yönü. Ölçülen kazanma oranı %34.9 (yazı-tura seviyesi),
+            // medyan tutma süresi 7.9 dakikaydı.
+            //
+            // Yeni davranış: momentum takibi için 2 ardışık bar aynı yönde olmalı.
+            // Her iki koşul da sağlanmazsa sinyal üretilmez (bekleme durumu).
+            var up1 = t3[^2] > t3[^3];
+            var up2 = t3[^3] > t3[^4];
+            t3TurnUp   = up1 && up2;      // 2 bar üst üste yukarı → giriş
+            t3TurnDown = !up1 && !up2;    // 2 bar üst üste aşağı → çıkış
         }
         else
         {
@@ -324,32 +346,65 @@ public class SignalEngine(
                 logger.LogDebug("RSI filtresi AL bloklandı: CoinId={Id} RSI={RSI:F1}", coinId, rsiValue);
                 return null;
             }
-        }
 
-        // ADX filtresi — trend gücü (sadece BUY sinyalinde)
-        decimal? adxValue = null;
-        if (dir == SignalDirection.Buy && strategy.UseAdxFilter)
-        {
-            adxValue = Indicators.TechnicalUtils.ComputeAdx(candles, strategy.AdxPeriod > 0 ? strategy.AdxPeriod : 14);
-            if (adxValue < strategy.AdxMinValue)
+            // Aşırı alım koruması — üst sınır yoktu, RSI 85'te bile giriş serbestti.
+            // Volatile modda zaten %5+ pompalanmış coin seçildiği için sistem
+            // sistematik olarak aşırı alım bölgesinden giriyordu.
+            if (dir == SignalDirection.Buy && strategy.RsiMaxValue > 0 && rsiValue > strategy.RsiMaxValue)
             {
                 if (strategyCoin is not null)
                 {
-                    strategyCoin.LastCheckedReason = $"T3 yukarı döndü ama ADX {adxValue:F1} < {strategy.AdxMinValue:F1} — trend zayıf, AL bloklandı";
+                    strategyCoin.LastCheckedReason =
+                        $"T3 yukarı döndü ama RSI {rsiValue:F1} > {strategy.RsiMaxValue:F0} — aşırı alım, AL bloklandı";
                     await db.SaveChangesAsync(ct);
                 }
-                logger.LogDebug("ADX filtresi AL bloklandı: CoinId={Id} ADX={ADX:F1}", coinId, adxValue);
+                logger.LogDebug("RSI aşırı alım bloklandı: CoinId={Id} RSI={RSI:F1}", coinId, rsiValue);
                 return null;
             }
         }
 
-        // MACD filtresi — bullish momentum (sadece BUY sinyalinde)
+        // ADX filtresi — trend gücü VE YÖNÜ (sadece BUY sinyalinde)
+        decimal? adxValue = null;
+        if (dir == SignalDirection.Buy && strategy.UseAdxFilter)
+        {
+            var (adx, plusDi, minusDi) = Indicators.TechnicalUtils.ComputeAdxFull(
+                candles, strategy.AdxPeriod > 0 ? strategy.AdxPeriod : 14);
+            adxValue = adx;
+
+            if (adx < strategy.AdxMinValue)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason = $"T3 yukarı döndü ama ADX {adx:F1} < {strategy.AdxMinValue:F1} — trend zayıf, AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("ADX filtresi AL bloklandı: CoinId={Id} ADX={ADX:F1}", coinId, adx);
+                return null;
+            }
+
+            // ADX trendin GÜCÜNÜ ölçer, YÖNÜNÜ değil — sert DÜŞÜŞTE de ADX yüksektir.
+            // Yön kontrolü olmadan bu filtre düşen coinleri onaylıyordu.
+            if (plusDi <= minusDi)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason =
+                        $"ADX {adx:F1} güçlü ama yön AŞAĞI (+DI {plusDi:F1} ≤ -DI {minusDi:F1}) — AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("ADX yön filtresi AL bloklandı: CoinId={Id} +DI={P:F1} -DI={M:F1}", coinId, plusDi, minusDi);
+                return null;
+            }
+        }
+
+        // MACD filtresi — bullish momentum GÜÇLENİYOR mu (sadece BUY sinyalinde)
         decimal? macdHistogram = null;
         if (dir == SignalDirection.Buy && strategy.UseMacdFilter)
         {
             var closes2 = candles.Select(c => c.Close).ToArray();
-            var (_, _, histogram) = Indicators.TechnicalUtils.ComputeMacd(closes2);
+            var (_, _, histogram, prevHistogram) = Indicators.TechnicalUtils.ComputeMacdFull(closes2);
             macdHistogram = histogram;
+
             if (histogram <= 0)
             {
                 if (strategyCoin is not null)
@@ -358,6 +413,60 @@ public class SignalEngine(
                     await db.SaveChangesAsync(ct);
                 }
                 logger.LogDebug("MACD filtresi AL bloklandı: CoinId={Id} histogram={H:F6}", coinId, histogram);
+                return null;
+            }
+
+            // Pozitif ama KÜÇÜLEN histogram trendin bittiğini gösterir — eski filtre
+            // bunu geçiriyordu. Momentumun güçlenmesini şart koşuyoruz.
+            if (histogram <= prevHistogram)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason =
+                        $"MACD pozitif ama zayıflıyor ({prevHistogram:F6} → {histogram:F6}) — AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("MACD zayıflama bloklandı: CoinId={Id} {Prev:F6}→{H:F6}", coinId, prevHistogram, histogram);
+                return null;
+            }
+        }
+
+        // EMA200 trend filtresi — fiyat uzun vadeli ortalamanın ÜSTÜNDE olmalı.
+        // Bu ayar (IsEma200RuleEnabled) daha önce yalnızca manuel Analiz ekranında
+        // okunuyordu; canlı sinyal yolunda hiç kullanılmıyordu (ölü ayar).
+        if (dir == SignalDirection.Buy && strategy.IsEma200RuleEnabled && candles.Count >= 200)
+        {
+            var closesForEma = candles.Select(c => c.Close).ToArray();
+            var ema200 = Indicators.TechnicalUtils.ComputeEma(closesForEma, 200);
+            var ema200Last = ema200[^2];
+
+            if (ema200Last > 0 && closePrice < ema200Last)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason =
+                        $"Fiyat {closePrice:F6} < EMA200 {ema200Last:F6} — uzun vadeli trend aşağı, AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("EMA200 filtresi AL bloklandı: CoinId={Id} fiyat={P:F6} ema200={E:F6}", coinId, closePrice, ema200Last);
+                return null;
+            }
+        }
+
+        // Üst zaman dilimi onayı — sinyal TF'i kısa vadeyi görür, üst TF ana trendi.
+        // 15m'de AL sinyali oluşsa bile 1h trendi aşağıysa giriş yapılmaz.
+        if (dir == SignalDirection.Buy && strategy.UseHigherTfConfirm)
+        {
+            var htfOk = await IsHigherTimeframeBullishAsync(coinId, strategy, ct);
+            if (!htfOk)
+            {
+                if (strategyCoin is not null)
+                {
+                    strategyCoin.LastCheckedReason =
+                        $"{strategy.HigherTimeframe} üst zaman dilimi trendi aşağı — AL bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("Üst TF filtresi AL bloklandı: CoinId={Id} HTF={TF}", coinId, strategy.HigherTimeframe);
                 return null;
             }
         }
@@ -539,29 +648,67 @@ public class SignalEngine(
             return null;
         }
 
-        // ADX filtresi — trend gücü (sadece BUY sinyalinde)
-        decimal? adxEma = null;
-        if (dir == SignalDirection.Buy && strategy.UseAdxFilter)
+        // RSI filtresi — bu yolda hiç uygulanmıyordu (T3-only yolunda vardı)
+        decimal? rsiEma = null;
+        if (dir == SignalDirection.Buy && strategy.IsRsiFilterEnabled)
         {
-            adxEma = Indicators.TechnicalUtils.ComputeAdx(candles, strategy.AdxPeriod > 0 ? strategy.AdxPeriod : 14);
-            if (adxEma < strategy.AdxMinValue)
+            var rsiArrEma = RsiIndicator.ComputeRsi(closes, 14);
+            rsiEma = Math.Round(rsiArrEma[^2], 2);
+
+            if (rsiEma < 50 || (strategy.RsiMaxValue > 0 && rsiEma > strategy.RsiMaxValue))
             {
                 if (strategyCoinEma is not null)
                 {
-                    strategyCoinEma.LastCheckedReason = $"T3+EMA200 AL var ama ADX {adxEma:F1} < {strategy.AdxMinValue:F1} — trend zayıf, bloklandı";
+                    strategyCoinEma.LastCheckedReason = rsiEma < 50
+                        ? $"T3+EMA200 AL var ama RSI {rsiEma:F1} < 50 — bloklandı"
+                        : $"T3+EMA200 AL var ama RSI {rsiEma:F1} > {strategy.RsiMaxValue:F0} — aşırı alım, bloklandı";
                     await db.SaveChangesAsync(ct);
                 }
-                logger.LogDebug("ADX filtresi (T3+EMA200) AL bloklandı: CoinId={Id} ADX={ADX:F1}", coinId, adxEma);
+                logger.LogDebug("RSI filtresi (T3+EMA200) bloklandı: CoinId={Id} RSI={R:F1}", coinId, rsiEma);
                 return null;
             }
         }
 
-        // MACD filtresi — bullish momentum (sadece BUY sinyalinde)
+        // ADX filtresi — trend gücü VE yönü (sadece BUY sinyalinde)
+        decimal? adxEma = null;
+        if (dir == SignalDirection.Buy && strategy.UseAdxFilter)
+        {
+            var (adxE, plusDiE, minusDiE) = Indicators.TechnicalUtils.ComputeAdxFull(
+                candles, strategy.AdxPeriod > 0 ? strategy.AdxPeriod : 14);
+            adxEma = adxE;
+
+            if (adxE < strategy.AdxMinValue)
+            {
+                if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason = $"T3+EMA200 AL var ama ADX {adxE:F1} < {strategy.AdxMinValue:F1} — trend zayıf, bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("ADX filtresi (T3+EMA200) AL bloklandı: CoinId={Id} ADX={ADX:F1}", coinId, adxE);
+                return null;
+            }
+
+            // ADX yön ayrımı yapmaz — düşüş trendinde de yüksektir
+            if (plusDiE <= minusDiE)
+            {
+                if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason =
+                        $"ADX {adxE:F1} güçlü ama yön AŞAĞI (+DI {plusDiE:F1} ≤ -DI {minusDiE:F1}) — bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("ADX yön filtresi (T3+EMA200) bloklandı: CoinId={Id}", coinId);
+                return null;
+            }
+        }
+
+        // MACD filtresi — momentum pozitif VE güçleniyor (sadece BUY sinyalinde)
         decimal? macdHistEma = null;
         if (dir == SignalDirection.Buy && strategy.UseMacdFilter)
         {
-            var (_, _, histEma) = Indicators.TechnicalUtils.ComputeMacd(closes);
+            var (_, _, histEma, prevHistEma) = Indicators.TechnicalUtils.ComputeMacdFull(closes);
             macdHistEma = histEma;
+
             if (histEma <= 0)
             {
                 if (strategyCoinEma is not null)
@@ -570,6 +717,33 @@ public class SignalEngine(
                     await db.SaveChangesAsync(ct);
                 }
                 logger.LogDebug("MACD filtresi (T3+EMA200) AL bloklandı: CoinId={Id} histogram={H:F6}", coinId, histEma);
+                return null;
+            }
+
+            if (histEma <= prevHistEma)
+            {
+                if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason =
+                        $"MACD pozitif ama zayıflıyor ({prevHistEma:F6} → {histEma:F6}) — bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("MACD zayıflama (T3+EMA200) bloklandı: CoinId={Id}", coinId);
+                return null;
+            }
+        }
+
+        // Üst zaman dilimi onayı
+        if (dir == SignalDirection.Buy && strategy.UseHigherTfConfirm)
+        {
+            if (!await IsHigherTimeframeBullishAsync(coinId, strategy, ct))
+            {
+                if (strategyCoinEma is not null)
+                {
+                    strategyCoinEma.LastCheckedReason = $"{strategy.HigherTimeframe} üst zaman dilimi trendi aşağı — bloklandı";
+                    await db.SaveChangesAsync(ct);
+                }
+                logger.LogDebug("Üst TF filtresi (T3+EMA200) bloklandı: CoinId={Id}", coinId);
                 return null;
             }
         }
@@ -944,6 +1118,39 @@ public class SignalEngine(
             result[pv.ParameterDefinition.ParameterKey] = pv.Value;
 
         return result;
+    }
+
+    /// <summary>
+    /// Üst zaman dilimi trend onayı. Sinyal TF'i kısa vadeli gürültüyü görür;
+    /// ana trendi üst TF belirler. Yükseliş şartı: fiyat EMA50'nin üstünde VE EMA50 yükseliyor.
+    /// Veri alınamazsa true döner (filtre engel olmaz — geçici API hatası işlemi durdurmasın).
+    /// </summary>
+    private async Task<bool> IsHigherTimeframeBullishAsync(
+        int coinId, UserStrategy strategy, CancellationToken ct)
+    {
+        var htf = string.IsNullOrWhiteSpace(strategy.HigherTimeframe) ? "1h" : strategy.HigherTimeframe;
+
+        var coin = await db.Coins.FirstOrDefaultAsync(c => c.Id == coinId, ct);
+        if (coin is null) return true;
+
+        var result = await binance.GetCandlesAsync(coin.Symbol, htf, 120, ct);
+        if (!result.Succeeded || result.Data is null || result.Data.Count < 60)
+        {
+            logger.LogDebug("Üst TF verisi alınamadı ({Symbol} {TF}) — filtre atlandı", coin.Symbol, htf);
+            return true;
+        }
+
+        var closes = result.Data.Select(c => c.Close).ToArray();
+        var ema = Indicators.TechnicalUtils.ComputeEma(closes, 50);
+
+        // [^1] açık mum — son kapanmış bar [^2]
+        var emaNow  = ema[^2];
+        var emaPrev = ema[^7];   // 5 bar öncesi: EMA'nın eğimi
+        var price   = closes[^2];
+
+        if (emaNow <= 0) return true;
+
+        return price > emaNow && emaNow > emaPrev;
     }
 
     private async Task<bool> IsCoinAllowedAsync(Guid userId, int coinId, CancellationToken ct)

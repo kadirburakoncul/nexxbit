@@ -9,7 +9,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import Header from '@/components/layout/Header'
-import { Plus, Pencil, Trash2, Power, X, Check, AlertCircle, AlertTriangle, TrendingUp, DollarSign, Zap, Flame, Info, BarChart2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Power, X, Check, AlertCircle, AlertTriangle, TrendingUp, DollarSign, Zap, Flame, Info, BarChart2, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
@@ -21,6 +21,13 @@ const schema = z.object({
   timeframe: z.string(),
   trailingStopPct: z.coerce.number().min(0.01).max(10),
   trailingActivationPct: z.coerce.number().min(0).max(20).default(1.0),
+  rsiMaxValue: z.coerce.number().min(50).max(100).default(75),
+  useHigherTfConfirm: z.boolean().default(false),
+  higherTimeframe: z.string().default('1h'),
+  useRiskBasedSizing: z.boolean().default(false),
+  riskPerTradePct: z.coerce.number().min(0.1).max(10).default(1.0),
+  maxConsecutiveLosses: z.coerce.number().int().min(2).max(20).default(5),
+  pauseOnDrawdownPct: z.coerce.number().min(5).max(50).default(15),
   stopLossPct: z.coerce.number().min(0.01).max(10),
   takeProfitPct: z.coerce.number().min(0.1).max(1000).nullable().optional(),
   minVolumeUsdt: z.coerce.number().min(1000).nullable().optional(),
@@ -69,6 +76,13 @@ const DEFAULT_VALUES = (indicatorId?: number): FormData => ({
   timeframe: '5m',
   trailingStopPct: 2.5,
   trailingActivationPct: 1.0,
+  rsiMaxValue: 75,
+  useHigherTfConfirm: true,
+  higherTimeframe: '1h',
+  useRiskBasedSizing: false,
+  riskPerTradePct: 1.0,
+  maxConsecutiveLosses: 5,
+  pauseOnDrawdownPct: 15,
   stopLossPct: 3.0,
   takeProfitPct: null,
   minVolumeUsdt: null,
@@ -247,6 +261,13 @@ export default function StrategyPage() {
                   timeframe: editing.timeframe,
                   trailingStopPct: editing.trailingStopPct,
                   trailingActivationPct: editing.trailingActivationPct ?? 1.0,
+                  rsiMaxValue: editing.rsiMaxValue ?? 75,
+                  useHigherTfConfirm: editing.useHigherTfConfirm ?? false,
+                  higherTimeframe: editing.higherTimeframe ?? '1h',
+                  useRiskBasedSizing: editing.useRiskBasedSizing ?? false,
+                  riskPerTradePct: editing.riskPerTradePct ?? 1.0,
+                  maxConsecutiveLosses: editing.maxConsecutiveLosses ?? 5,
+                  pauseOnDrawdownPct: editing.pauseOnDrawdownPct ?? 15,
                   stopLossPct: editing.stopLossPct,
                   takeProfitPct: editing.takeProfitPct ?? null,
                   minVolumeUsdt: editing.minVolumeUsdt ?? null,
@@ -684,6 +705,8 @@ function StrategyForm({
   const useMacdFilter = watch('useMacdFilter')
   const useBreakevenStop = watch('useBreakevenStop')
   const isEma200RuleEnabled = watch('isEma200RuleEnabled')
+  const useHigherTfConfirm = watch('useHigherTfConfirm')
+  const useRiskBasedSizing = watch('useRiskBasedSizing')
 
   const [usePartialTp, setUsePartialTp] = useState(initialValues.partialTpPct != null)
 
@@ -726,6 +749,13 @@ function StrategyForm({
         timeframe: d.timeframe,
         trailingStopPct: d.trailingStopPct,
         trailingActivationPct: d.trailingActivationPct,
+        rsiMaxValue: d.rsiMaxValue,
+        useHigherTfConfirm: d.useHigherTfConfirm,
+        higherTimeframe: d.higherTimeframe,
+        useRiskBasedSizing: d.useRiskBasedSizing,
+        riskPerTradePct: d.riskPerTradePct,
+        maxConsecutiveLosses: d.maxConsecutiveLosses,
+        pauseOnDrawdownPct: d.pauseOnDrawdownPct,
         stopLossPct: d.stopLossPct,
         takeProfitPct: d.takeProfitPct ?? null,
         minVolumeUsdt: d.minVolumeUsdt ?? null,
@@ -1025,10 +1055,19 @@ function StrategyForm({
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              RSI, fiyatın ne kadar "aşırı alınmış/satılmış" olduğunu 0-100 arası ölçer. Bu filtre açıkken AL sinyali yalnızca RSI 50'nin üzerindeyken (yani yukarı momentum varken) işleme alınır — zayıf/sahte dönüşleri eler. <span className="text-slate-600">Önerimiz: önce kapalı test edin, sinyal sayısı azalır ama kalitesi artar.</span>
+              RSI, fiyatın ne kadar "aşırı alınmış/satılmış" olduğunu 0-100 arası ölçer. Bu filtre açıkken AL sinyali yalnızca RSI 50'nin üzerindeyken (yani yukarı momentum varken) işleme alınır — zayıf/sahte dönüşleri eler. Ayrıca aşağıdaki <span className="text-cyan-300">üst sınırın</span> üstünde de alım yapılmaz: aşırı alım bölgesinden, yani tepeden giriş engellenir.
             </p>
           </div>
         </div>
+        {isRsiFilterEnabled && (
+          <div className="pl-2" onClick={e => e.stopPropagation()}>
+            <label className="text-xs text-slate-400 block mb-1">RSI Üst Sınırı (aşırı alım)</label>
+            <input {...register('rsiMaxValue')} type="number" step="1" min="50" max="100" className={`${inputCls} max-w-xs`} />
+            <p className="text-xs text-slate-600 mt-0.5">
+              RSI bu değerin üstündeyse AL sinyali bloklanır. Klasik aşırı alım eşiği 70'tir; volatil coinlerde 75–80 daha uygundur.
+            </p>
+          </div>
+        )}
 
         {/* ADX Filtresi */}
         <div
@@ -1127,6 +1166,102 @@ function StrategyForm({
             <p className="text-xs text-slate-600 mt-0.5">Pozisyon bu % kâra ulaşınca SL giriş fiyatına taşınır. Önerilen: 1.0–2.0</p>
           </div>
         )}
+
+        {/* Üst Zaman Dilimi Onayı */}
+        <div
+          onClick={() => setValue('useHigherTfConfirm', !useHigherTfConfirm)}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            useHigherTfConfirm
+              ? 'bg-sky-500/10 border-sky-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5', useHigherTfConfirm ? 'bg-sky-500/20' : 'bg-white/5')}>
+            <TrendingUp size={15} className={useHigherTfConfirm ? 'text-sky-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', useHigherTfConfirm ? 'text-sky-300' : 'text-slate-300')}>Üst Zaman Dilimi Onayı</p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', useHigherTfConfirm ? 'bg-sky-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useHigherTfConfirm ? 'left-4' : 'left-0.5')} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Sinyal kısa zaman diliminde oluşsa bile, üst zaman diliminde ana trend aşağıysa alım yapılmaz. Kısa vadeli gürültüye kapılıp trende karşı işlem açmayı önler.
+            </p>
+          </div>
+        </div>
+        {useHigherTfConfirm && (
+          <div className="pl-2" onClick={e => e.stopPropagation()}>
+            <label className="text-xs text-slate-400 block mb-1">Üst Zaman Dilimi</label>
+            <select {...register('higherTimeframe')} className={`${inputCls} max-w-xs`}>
+              <option value="15m">15 dakika</option>
+              <option value="1h">1 saat</option>
+              <option value="4h">4 saat</option>
+              <option value="1d">1 gün</option>
+            </select>
+            <p className="text-xs text-slate-600 mt-0.5">
+              Trend onayı: fiyat EMA50'nin üstünde ve EMA50 yükseliyor olmalı. Sinyal periyodunun 4–8 katı önerilir (15m sinyal → 1h onay).
+            </p>
+          </div>
+        )}
+
+        {/* Risk Bazlı Pozisyon Boyutu */}
+        <div
+          onClick={() => setValue('useRiskBasedSizing', !useRiskBasedSizing)}
+          className={cn(
+            'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors select-none',
+            useRiskBasedSizing
+              ? 'bg-rose-500/10 border-rose-500/30'
+              : 'bg-white/[0.03] border-white/8 hover:border-white/15'
+          )}
+        >
+          <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5', useRiskBasedSizing ? 'bg-rose-500/20' : 'bg-white/5')}>
+            <Shield size={15} className={useRiskBasedSizing ? 'text-rose-400' : 'text-slate-500'} />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className={cn('text-sm font-semibold', useRiskBasedSizing ? 'text-rose-300' : 'text-slate-300')}>Risk Bazlı Pozisyon Boyutu</p>
+              <div className={cn('w-8 h-4 rounded-full transition-colors relative shrink-0', useRiskBasedSizing ? 'bg-rose-500' : 'bg-white/15')}>
+                <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useRiskBasedSizing ? 'left-4' : 'left-0.5')} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Sabit tutar yerine <span className="text-rose-300">"her işlemde sermayenin en fazla %X'ini kaybet"</span> mantığı. Pozisyon boyutu stop mesafesine göre hesaplanır: volatil coinde küçük, sakin coinde büyük pozisyon açılır — her işlemin parasal riski eşitlenir.
+            </p>
+          </div>
+        </div>
+        {useRiskBasedSizing && (
+          <div className="pl-2" onClick={e => e.stopPropagation()}>
+            <label className="text-xs text-slate-400 block mb-1">İşlem Başına Risk (%)</label>
+            <input {...register('riskPerTradePct')} type="number" step="0.1" min="0.1" max="10" className={`${inputCls} max-w-xs`} />
+            <p className="text-xs text-slate-600 mt-0.5">Tek işlemde kaybedilebilecek maksimum sermaye yüzdesi. Profesyonel standart: %1–2.</p>
+          </div>
+        )}
+
+        {/* Kill Switch */}
+        <div className="p-4 rounded-xl border bg-white/[0.03] border-white/8">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle size={15} className="text-amber-400" />
+            <p className="text-sm font-semibold text-slate-300">Kill Switch (Ardışık Zarar Koruması)</p>
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            Strateji üst üste belirlenen sayıda zarar ederse otomatik olarak <span className="text-amber-300">6 saat duraklatılır</span>. Piyasa rejimi değiştiğinde veya parametreler artık uymadığında sermayenin tükenmesini önleyen son savunma hattıdır. Kârlı bir işlem sayacı sıfırlar.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Ardışık Zarar Limiti</label>
+              <input {...register('maxConsecutiveLosses')} type="number" step="1" min="2" max="20" className={inputCls} />
+              <p className="text-xs text-slate-600 mt-0.5">Önerilen: 4–6</p>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Drawdown Eşiği (%)</label>
+              <input {...register('pauseOnDrawdownPct')} type="number" step="1" min="5" max="50" className={inputCls} />
+              <p className="text-xs text-slate-600 mt-0.5">Sermaye bu kadar geri çekilirse duraklat</p>
+            </div>
+          </div>
+        </div>
 
         {/* ATR Tabanlı Stop */}
         <div

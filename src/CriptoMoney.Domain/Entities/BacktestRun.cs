@@ -26,6 +26,12 @@ public class BacktestRun : BaseEntity
     public int? WinningTrades { get; set; }
     public decimal? MaxDrawdown { get; set; }
     public decimal? SharpeRatio { get; set; }
+
+    // Walk-forward doğrulama — overfit tespiti için %70/%30 zaman bölmesi
+    public decimal? InSampleNetPnlPct { get; set; }
+    public decimal? OutOfSampleNetPnlPct { get; set; }
+    public decimal? OutOfSampleWinRate { get; set; }
+    public string? OutOfSampleNote { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime? CompletedAt { get; set; }
 

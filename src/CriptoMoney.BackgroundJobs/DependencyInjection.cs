@@ -57,6 +57,7 @@ public static class DependencyInjection
         services.AddScoped<BalanceSnapshotJob>();
         services.AddScoped<DailyReportJob>();
         services.AddScoped<BistSignalScanJob>();
+        services.AddScoped<PositionReconciliationJob>();
         services.AddScoped<IBacktestJobScheduler, HangfireBacktestJobScheduler>();
 
         return services;
@@ -81,6 +82,13 @@ public static class DependencyInjection
             "daily-report",
             job => job.ExecuteAsync(CancellationToken.None),
             "0 8 * * *",
+            new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+
+        // Cüzdan-DB mutabakatı — hayalet pozisyonları yakalar (saatte bir yeterli)
+        manager.AddOrUpdate<PositionReconciliationJob>(
+            "position-reconciliation",
+            job => job.ExecuteAsync(CancellationToken.None),
+            "15 * * * *",
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 
         // BIST seansı 10:00-18:10 TRT = 07:00-15:10 UTC — geniş bir pencerede 10dk'da bir dener,

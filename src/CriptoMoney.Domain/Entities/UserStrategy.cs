@@ -58,8 +58,33 @@ public class UserStrategy : BaseEntity
     public int AdxPeriod { get; set; } = 14;
     public decimal AdxMinValue { get; set; } = 25m;
 
-    // MACD konfirmasyonu — histogram > 0 = bullish momentum
+    // MACD konfirmasyonu — histogram > 0 VE artıyor (momentum güçleniyor)
     public bool UseMacdFilter { get; set; } = false;
+
+    /// <summary>
+    /// RSI üst sınırı — bu değerin üstünde AL sinyali bloklanır (aşırı alım koruması).
+    /// Alt sınır 50 sabittir; üst sınır olmadan zaten pompalanmış coinlere giriliyordu.
+    /// </summary>
+    public decimal RsiMaxValue { get; set; } = 75m;
+
+    // Üst zaman dilimi onayı — sinyal TF'inde AL, üst TF'te trend yukarı olmalı
+    public bool UseHigherTfConfirm { get; set; } = false;
+    public string HigherTimeframe { get; set; } = "1h";
+
+    /// <summary>
+    /// Risk bazlı pozisyon boyutu: sermayenin RiskPerTradePct kadarı riske atılır,
+    /// pozisyon büyüklüğü stop mesafesine göre hesaplanır (volatil coinde küçük,
+    /// sakin coinde büyük). Kapalıysa sabit MaxPositionSizeUsdt kullanılır.
+    /// </summary>
+    public bool UseRiskBasedSizing { get; set; } = false;
+    public decimal RiskPerTradePct { get; set; } = 1.0m;
+
+    // Kill switch — ardışık zarar ve drawdown koruması
+    public int MaxConsecutiveLosses { get; set; } = 5;
+    public int ConsecutiveLossCount { get; set; } = 0;
+    public decimal PauseOnDrawdownPct { get; set; } = 15m;
+    /// <summary>Kill switch tetiklendiğinde strateji bu zamana kadar yeni pozisyon açmaz.</summary>
+    public DateTime? PausedUntil { get; set; }
 
     // Breakeven stop — kârda SL'yi giriş fiyatına taşı
     public bool UseBreakevenStop { get; set; } = false;

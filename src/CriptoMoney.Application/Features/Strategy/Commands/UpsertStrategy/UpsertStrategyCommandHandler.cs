@@ -41,6 +41,13 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
             existing.Timeframe = request.Timeframe;
             existing.TrailingStopPct = request.TrailingStopPct;
             existing.TrailingActivationPct = request.TrailingActivationPct;
+            existing.RsiMaxValue = request.RsiMaxValue;
+            existing.UseHigherTfConfirm = request.UseHigherTfConfirm;
+            existing.HigherTimeframe = request.HigherTimeframe;
+            existing.UseRiskBasedSizing = request.UseRiskBasedSizing;
+            existing.RiskPerTradePct = request.RiskPerTradePct;
+            existing.MaxConsecutiveLosses = request.MaxConsecutiveLosses;
+            existing.PauseOnDrawdownPct = request.PauseOnDrawdownPct;
             existing.StopLossPct = request.StopLossPct;
             existing.IsVolatileMode = request.IsVolatileMode;
             existing.TakeProfitPct = request.TakeProfitPct;
@@ -96,6 +103,13 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
                 Timeframe = request.Timeframe,
                 TrailingStopPct = request.TrailingStopPct,
                 TrailingActivationPct = request.TrailingActivationPct,
+                RsiMaxValue = request.RsiMaxValue,
+                UseHigherTfConfirm = request.UseHigherTfConfirm,
+                HigherTimeframe = request.HigherTimeframe,
+                UseRiskBasedSizing = request.UseRiskBasedSizing,
+                RiskPerTradePct = request.RiskPerTradePct,
+                MaxConsecutiveLosses = request.MaxConsecutiveLosses,
+                PauseOnDrawdownPct = request.PauseOnDrawdownPct,
                 StopLossPct = request.StopLossPct,
                 IsVolatileMode = request.IsVolatileMode,
                 TakeProfitPct = request.TakeProfitPct,
