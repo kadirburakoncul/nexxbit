@@ -17,6 +17,13 @@ public class AutoTradeService(
     /// <summary>Binance spot gidiş-dönüş komisyonu (%0.1 alış + %0.1 satış).</summary>
     private const decimal RoundTripFeePct = 0.2m;
 
+    /// <summary>
+    /// Pozisyon açarken borsa minNotional'ının kaç katı hedeflenir.
+    /// 2× ile pozisyon değeri yarıya inse bile satılabilir kalır — tam sınırda
+    /// açılan pozisyonlar komisyon + küçük düşüşle satılamaz hale geliyordu.
+    /// </summary>
+    private const decimal MinNotionalSafetyFactor = 2.0m;
+
     public async Task ProcessSignalAsync(TradeSignal signal, CancellationToken ct = default)
     {
         await SaveSignalAsync(signal, ct);
@@ -238,6 +245,26 @@ public class AutoTradeService(
                 logger.LogWarning("Min emir tutarı karşılanmıyor: {Qty:F2} USDT < {Min:F2} USDT, {Symbol} atlandı (strateji devre dışı bırakılmadı)",
                     orderQty, minOrderSize, symbol);
                 return Result.Failure($"Emir tutarı minimum {minOrderSize:F0} USDT altında ({orderQty:F2} USDT).");
+            }
+
+            // minNotional güvenlik marjı — SATILAMAZ pozisyon açmayı önler.
+            // Binance minNotional'ı (genelde 5 USDT) satışta da uygular: tam sınırda
+            // açılan pozisyon, %0.1 komisyon + küçük bir fiyat düşüşüyle sınırın altına
+            // iner ve coin cüzdanda KİLİTLENİR (17 gün açık kalan OGNUSDT böyle oluştu:
+            // 278 coin × $0.0168 = $4.68 < $5.00). Marjla açıp bu tuzağı kapatıyoruz.
+            var symbolRules = await binance.GetSymbolRulesAsync(symbol, ct);
+            if (symbolRules is not null && symbolRules.MinNotional > 0)
+            {
+                var safeMinNotional = symbolRules.MinNotional * MinNotionalSafetyFactor;
+                if (orderQty < safeMinNotional)
+                {
+                    logger.LogWarning(
+                        "Emir atlandı: {Symbol} tutarı {Qty:F2} USDT, güvenli alt sınır {Safe:F2} USDT " +
+                        "(borsa minNotional={Min:F2} × {Factor}). Daha küçük açılırsa pozisyon satılamaz hale gelir.",
+                        symbol, orderQty, safeMinNotional, symbolRules.MinNotional, MinNotionalSafetyFactor);
+                    return Result.Failure(
+                        $"{symbol} için emir tutarı en az {safeMinNotional:F2} USDT olmalı (satılabilirlik marjı).");
+                }
             }
         }
         else
