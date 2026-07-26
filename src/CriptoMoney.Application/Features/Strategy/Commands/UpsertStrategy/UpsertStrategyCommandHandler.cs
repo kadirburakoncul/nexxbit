@@ -40,6 +40,7 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
             existing.IndicatorId = request.IndicatorId;
             existing.Timeframe = request.Timeframe;
             existing.TrailingStopPct = request.TrailingStopPct;
+            existing.TrailingActivationPct = request.TrailingActivationPct;
             existing.StopLossPct = request.StopLossPct;
             existing.IsVolatileMode = request.IsVolatileMode;
             existing.TakeProfitPct = request.TakeProfitPct;
@@ -94,6 +95,7 @@ public class UpsertStrategyCommandHandler(IApplicationDbContext db)
                 IndicatorId = request.IndicatorId,
                 Timeframe = request.Timeframe,
                 TrailingStopPct = request.TrailingStopPct,
+                TrailingActivationPct = request.TrailingActivationPct,
                 StopLossPct = request.StopLossPct,
                 IsVolatileMode = request.IsVolatileMode,
                 TakeProfitPct = request.TakeProfitPct,

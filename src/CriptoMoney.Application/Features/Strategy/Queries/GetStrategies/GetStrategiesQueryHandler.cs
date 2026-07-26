@@ -37,6 +37,7 @@ public class GetStrategiesQueryHandler(IApplicationDbContext db)
             s.IndicatorId.HasValue ? indicatorNames.GetValueOrDefault(s.IndicatorId.Value) : null,
             s.Timeframe,
             s.TrailingStopPct,
+            s.TrailingActivationPct,
             s.StopLossPct,
             s.TakeProfitPct,
             s.MinVolumeUsdt,

@@ -14,6 +14,9 @@ public class AutoTradeService(
     IEmailService emailService,
     ILogger<AutoTradeService> logger) : IAutoTradeService
 {
+    /// <summary>Binance spot gidiş-dönüş komisyonu (%0.1 alış + %0.1 satış).</summary>
+    private const decimal RoundTripFeePct = 0.2m;
+
     public async Task ProcessSignalAsync(TradeSignal signal, CancellationToken ct = default)
     {
         await SaveSignalAsync(signal, ct);
@@ -249,14 +252,17 @@ public class AutoTradeService(
                 return Result.Failure("Bu pozisyon başka bir stratejiye ait.");
             }
 
-            var baseAsset = symbol.EndsWith("USDT") ? symbol[..^4] : symbol.Replace("BTC", "").Replace("ETH", "");
-            orderQty = await binance.GetCoinBalanceAsync(signal.UserId, baseAsset, ct);
+            // Cüzdandaki tüm bakiyeyi sat; miktar stepSize'a yuvarlanır ve minNotional doğrulanır.
+            // Ham bakiye gönderilirse Binance LOT_SIZE filtresinden emri reddeder.
+            orderQty = await binance.ResolveSellQuantityAsync(
+                signal.UserId, symbol, desiredQty: 0m, price: signal.Price, ct);
+
             if (orderQty <= 0)
             {
-                logger.LogWarning("Satılacak coin bakiyesi 0: {Symbol} UserId={UserId}", symbol, signal.UserId);
-                return Result.Failure($"Binance'te satılacak {baseAsset} bakiyesi bulunamadı.");
+                logger.LogWarning("Satılabilir miktar yok (bakiye/stepSize/minNotional): {Symbol} UserId={UserId}",
+                    symbol, signal.UserId);
+                return Result.Failure($"{symbol} için satılabilir bakiye bulunamadı.");
             }
-            orderQty = Math.Floor(orderQty * 100_000_000m) / 100_000_000m;
         }
 
         var quoteQty = orderQty;
@@ -404,8 +410,10 @@ public class AutoTradeService(
 
         if (position.EntryPrice > 0)
         {
+            // Binance spot komisyonu (%0.1 alış + %0.1 satış) düşülür — sanal sonuçlar
+            // gerçek işlemle kıyaslanabilir olmalı.
             var pnlPct = (signal.Price - position.EntryPrice) / position.EntryPrice * 100m;
-            position.RealizedPnlPct = Math.Round(pnlPct, 4);
+            position.RealizedPnlPct = Math.Round(pnlPct - RoundTripFeePct, 4);
         }
 
         await db.SaveChangesAsync(ct);
@@ -427,8 +435,9 @@ public class AutoTradeService(
 
         var (slPriceReal, tpPriceReal, trailingPctReal) = ComputeStops(price, strategy, signal.IndicatorScores);
 
-        // Binance'den gelen gerçek coin miktarını kullan (komisyon mahsup edilmiş).
-        // Formül (valueUsdt/price) kullanmak yetersiz bakiye hatasına yol açar.
+        // Binance'in doldurduğu BRÜT miktar — komisyon (%0.1) buradan DÜŞÜLMEMİŞTİR,
+        // cüzdana giren miktar bundan azdır. Bu yüzden satışta bu değer doğrudan
+        // kullanılamaz; ResolveSellQuantityAsync cüzdan bakiyesiyle sınırlar.
         var actualQty = (order.FilledQuantity ?? 0) > 0 ? order.FilledQuantity!.Value : valueUsdt / price;
 
         db.Positions.Add(new Position
@@ -599,7 +608,10 @@ public class AutoTradeService(
             {
                 slPrice    = entryPrice - atr * strategy.AtrSlMultiplier;
                 tpPrice    = entryPrice + atr * strategy.AtrTpMultiplier;
-                trailingPct = null; // ATR modunda trailing yerine TP kullan
+                // ATR modunda birincil çıkış TP'dir; trailing yedek koruma olarak
+                // strateji yüzdesiyle devam eder (monitor bu değere geri düşer).
+                // Trailing artık aktivasyon eşiği + giriş üstü tabanla çalıştığı için
+                // zarara yol açmaz, yalnızca TP'ye ulaşmayan hareketlerde kârı korur.
             }
             else
             {

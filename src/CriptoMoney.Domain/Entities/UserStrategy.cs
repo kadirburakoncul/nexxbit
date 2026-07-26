@@ -9,6 +9,12 @@ public class UserStrategy : BaseEntity
     public string Name { get; set; } = string.Empty;
     public string Timeframe { get; set; } = "1h";
     public decimal TrailingStopPct { get; set; } = 5.0m;
+    /// <summary>
+    /// Trailing stop bu kâr yüzdesine ulaşılmadan devreye girmez.
+    /// 0 = girişten itibaren aktif (eski davranış — girişten sonraki normal
+    /// dalgalanmada erken satışa yol açar).
+    /// </summary>
+    public decimal TrailingActivationPct { get; set; } = 1.0m;
     public decimal StopLossPct { get; set; } = 3.0m;
     public decimal? TakeProfitPct { get; set; } = null;
     public int MomentumFreshFilterMinutes { get; set; } = 5;

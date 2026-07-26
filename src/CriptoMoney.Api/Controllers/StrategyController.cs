@@ -215,7 +215,8 @@ public class StrategyController(IMediator mediator, IApplicationDbContext db) : 
             req.MaxOpenPositions, req.MaxPositionSizeUsdt, req.MaxPositionSizePct, req.MinPositionSizeUsdt,
             req.UseAdxFilter, req.AdxPeriod, req.AdxMinValue,
             req.UseMacdFilter,
-            req.UseBreakevenStop, req.BreakevenTriggerPct);
+            req.UseBreakevenStop, req.BreakevenTriggerPct,
+            req.TrailingActivationPct);
 }
 
 public class UpsertStrategyRequest
@@ -225,6 +226,7 @@ public class UpsertStrategyRequest
     public List<int> CoinIds { get; set; } = [];
     public string Timeframe { get; set; } = "1h";
     public decimal TrailingStopPct { get; set; }
+    public decimal TrailingActivationPct { get; set; } = 1.0m;
     public decimal StopLossPct { get; set; }
     public decimal? TakeProfitPct { get; set; }
     public decimal? MinVolumeUsdt { get; set; }

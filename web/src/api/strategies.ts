@@ -14,6 +14,7 @@ export interface Strategy {
   indicatorDisplayName: string | null
   timeframe: string
   trailingStopPct: number
+  trailingActivationPct: number
   stopLossPct: number
   takeProfitPct: number | null
   minVolumeUsdt: number | null
@@ -58,6 +59,7 @@ export interface UpsertStrategyRequest {
   coinIds: number[]
   timeframe: string
   trailingStopPct: number
+  trailingActivationPct: number
   stopLossPct: number
   takeProfitPct: number | null
   minVolumeUsdt: number | null

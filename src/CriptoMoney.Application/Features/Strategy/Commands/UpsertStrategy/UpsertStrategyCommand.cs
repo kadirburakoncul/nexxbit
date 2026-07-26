@@ -11,7 +11,7 @@ public record UpsertStrategyCommand(
     List<int> CoinIds,
     string Timeframe,
     decimal TrailingStopPct = 2.5m,
-    decimal StopLossPct = 2.0m,
+    decimal StopLossPct = 3.0m,
     bool IsVolatileMode = false,
     decimal? TakeProfitPct = null,
     decimal? MinVolumeUsdt = null,
@@ -52,5 +52,6 @@ public record UpsertStrategyCommand(
     bool UseMacdFilter = false,
     // Breakeven stop
     bool UseBreakevenStop = false,
-    decimal BreakevenTriggerPct = 1.5m
+    decimal BreakevenTriggerPct = 1.5m,
+    decimal TrailingActivationPct = 1.0m
 ) : IRequest<Result<Guid>>;

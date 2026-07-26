@@ -217,6 +217,105 @@ public class BinanceService(
         }
     }
 
+    // ─── Sembol işlem kuralları (LOT_SIZE / NOTIONAL) ────────────────────────────
+    // Exchange info nadiren değişir; 6 saatlik cache ile her emirde API çağrısı yapılmaz.
+    private static readonly SemaphoreSlim _rulesLock = new(1, 1);
+    private static Dictionary<string, SymbolTradeRules>? _rulesCache;
+    private static DateTime _rulesCachedAt = DateTime.MinValue;
+    private static readonly TimeSpan RulesTtl = TimeSpan.FromHours(6);
+
+    public async Task<SymbolTradeRules?> GetSymbolRulesAsync(string symbol, CancellationToken ct = default)
+    {
+        var cache = await GetRulesCacheAsync(ct);
+        return cache is not null && cache.TryGetValue(symbol, out var rules) ? rules : null;
+    }
+
+    private async Task<Dictionary<string, SymbolTradeRules>?> GetRulesCacheAsync(CancellationToken ct)
+    {
+        if (_rulesCache is not null && DateTime.UtcNow - _rulesCachedAt < RulesTtl)
+            return _rulesCache;
+
+        await _rulesLock.WaitAsync(ct);
+        try
+        {
+            // Bekleme sırasında başka thread doldurmuş olabilir
+            if (_rulesCache is not null && DateTime.UtcNow - _rulesCachedAt < RulesTtl)
+                return _rulesCache;
+
+            using var client = BinanceClientFactory.CreatePublicRest();
+            var result = await client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct: ct);
+            if (!result.Success)
+            {
+                logger.LogWarning("Exchange info alınamadı: {Error}", result.Error?.Message);
+                return _rulesCache; // eski cache varsa onu kullan
+            }
+
+            var map = new Dictionary<string, SymbolTradeRules>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in result.Data.Symbols)
+            {
+                var lot = s.LotSizeFilter;
+                var notional = s.NotionalFilter;
+                map[s.Name] = new SymbolTradeRules(
+                    s.Name,
+                    lot?.StepSize ?? 0m,
+                    lot?.MinQuantity ?? 0m,
+                    notional?.MinNotional ?? s.MinNotionalFilter?.MinNotional ?? 0m);
+            }
+
+            _rulesCache = map;
+            _rulesCachedAt = DateTime.UtcNow;
+            logger.LogInformation("Sembol işlem kuralları yüklendi: {Count} sembol", map.Count);
+            return _rulesCache;
+        }
+        finally
+        {
+            _rulesLock.Release();
+        }
+    }
+
+    public async Task<decimal> ResolveSellQuantityAsync(
+        Guid userId, string symbol, decimal desiredQty, decimal price, CancellationToken ct = default)
+    {
+        var baseAsset = ExtractBaseAsset(symbol);
+        var walletQty = await GetCoinBalanceAsync(userId, baseAsset, ct);
+
+        // Cüzdanda olandan fazlasını satamayız (komisyon nedeniyle alınan miktardan az olur)
+        var qty = desiredQty > 0 ? Math.Min(desiredQty, walletQty) : walletQty;
+        if (qty <= 0)
+        {
+            logger.LogWarning("Satış iptal: {Symbol} cüzdan bakiyesi yok (istenen={Want}, cüzdan={Have})",
+                symbol, desiredQty, walletQty);
+            return 0;
+        }
+
+        var rules = await GetSymbolRulesAsync(symbol, ct);
+        if (rules is null)
+        {
+            logger.LogWarning("{Symbol} için işlem kuralı bulunamadı — ham miktar kullanılıyor", symbol);
+            return qty;
+        }
+
+        var adjusted = rules.RoundQuantityDown(qty);
+        if (!rules.IsSellable(adjusted, price))
+        {
+            logger.LogWarning(
+                "Satış iptal: {Symbol} miktar kurallara uymuyor. qty={Qty} → {Adj} (step={Step} minQty={MinQ} minNotional={MinN} değer={Val:F2})",
+                symbol, qty, adjusted, rules.StepSize, rules.MinQuantity, rules.MinNotional, adjusted * price);
+            return 0;
+        }
+
+        return adjusted;
+    }
+
+    /// <summary>USDT/BTC/ETH/BNB/FDUSD/TRY quote'larını ayıklayarak base asset'i döndürür.</summary>
+    private static string ExtractBaseAsset(string symbol)
+    {
+        foreach (var quote in new[] { "USDT", "FDUSD", "TUSD", "BUSD", "USDC", "TRY", "BTC", "ETH", "BNB" })
+            if (symbol.EndsWith(quote, StringComparison.OrdinalIgnoreCase))
+                return symbol[..^quote.Length];
+        return symbol;
+    }
+
     public async Task<decimal?> GetCurrentPriceAsync(string symbol, CancellationToken ct = default)
     {
         using var client = BinanceClientFactory.CreatePublicRest();

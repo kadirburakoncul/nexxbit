@@ -18,6 +18,13 @@ public class TrailingStopMonitorService(
     ITelegramService telegram,
     ILogger<TrailingStopMonitorService> logger) : BackgroundService
 {
+    /// <summary>
+    /// Binance spot komisyonu: alışta %0.1 + satışta %0.1 = gidiş-dönüş %0.2.
+    /// Sanal pozisyon P&amp;L'inden düşülür; aksi halde simülasyon sonuçları
+    /// gerçekte oluşmayan bir kârı gösterir (281 işlemde ~56 puan sapma ölçüldü).
+    /// </summary>
+    private const decimal RoundTripFeePct = 0.2m;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("TrailingStopMonitorService başladı.");
@@ -129,7 +136,17 @@ public class TrailingStopMonitorService(
 
         var trailingPct  = position.TrailingStopPct ?? strategy?.TrailingStopPct ?? 5.0m;
 
-        var trailingTrigger = peak  * (1 - trailingPct / 100m);
+        // ── Trailing stop: aktivasyon eşiği + zarar tabanı ──────────────────────
+        // Eski davranış girişten itibaren aktifti: coin +2% çıkıp %2.5 geri çekilince
+        // ZARARLA satıyordu (peak×0.975 giriş fiyatının altına düşebiliyor).
+        // 1) Aktivasyon: zirve kârı eşiği geçmeden trailing devreye girmez.
+        // 2) Taban: tetik fiyatı asla giriş+komisyon altına inmez — trailing zararla satmaz.
+        var activationPct   = strategy?.TrailingActivationPct ?? 1.0m;
+        var peakProfitPct   = entry > 0 ? (peak - entry) / entry * 100m : 0m;
+        var trailingActive  = peakProfitPct >= activationPct;
+
+        var trailingFloor   = entry * (1 + RoundTripFeePct / 100m);
+        var trailingTrigger = Math.Max(peak * (1 - trailingPct / 100m), trailingFloor);
         // Position'daki SL fiyatını kullan; yoksa strategy %'sinden hesapla
         var stopLossTrigger = position.StopLossPrice
             ?? entry * (1 - (strategy?.StopLossPct ?? 3.0m) / 100m);
@@ -177,13 +194,11 @@ public class TrailingStopMonitorService(
             exitReason = ExitReason.TakeProfit;
         else if (currentPrice <= stopLossTrigger)
             exitReason = ExitReason.StopLoss;
-        else
+        else if (trailingActive && currentPrice <= trailingTrigger)
         {
-            // C: Trailing stop her zaman aktif — partial TP bekleme kaldırıldı.
-            // Erken düşüşlerde SL önce tetiklenir (SL trigger > trailing trigger olduğu durumlarda).
-            // Coin yükseldikçe peak artar, trailing stop peak'i takip eder.
-            if (currentPrice <= trailingTrigger)
-                exitReason = ExitReason.TrailingStop;
+            // Trailing yalnızca kâr eşiği aşıldıktan sonra ve taban üstünde tetiklenir.
+            // Eşik altındaki normal dalgalanmada SL tek koruma katmanıdır.
+            exitReason = ExitReason.TrailingStop;
         }
 
         if (exitReason is null) return;
@@ -209,7 +224,11 @@ public class TrailingStopMonitorService(
         if (!position.IsVirtual && position.EntryQuantity > 0)
         {
             // Gerçek pozisyon: ÖNCE sat, SONRA state güncelle.
-            var sellQty = Math.Floor(position.EntryQuantity * (closePct / 100m) * 100_000_000m) / 100_000_000m;
+            // Miktar cüzdan bakiyesi + stepSize + minNotional kurallarına uydurulur.
+            var sellQty = await binance.ResolveSellQuantityAsync(
+                position.UserId, position.Coin.Symbol,
+                position.EntryQuantity * (closePct / 100m), currentPrice, ct);
+
             if (sellQty > 0)
             {
                 var sellResult = await binance.PlaceMarketOrderAsync(
@@ -276,7 +295,9 @@ public class TrailingStopMonitorService(
             position.ClosePrice     = currentPrice;
             position.ClosedAt       = DateTime.UtcNow;
             position.CloseReason    = exitReason.ToString();
-            position.RealizedPnlPct = Math.Round((currentPrice - entry) / entry * 100m, 4);
+            // Komisyon düşülmüş net P&L — gerçek işlemle karşılaştırılabilir olsun
+            position.RealizedPnlPct = Math.Round(
+                (currentPrice - entry) / entry * 100m - RoundTripFeePct, 4);
             // USDT tutarlarını da hesapla (istatistik ve raporlama için)
             position.CloseValueUsdt = position.EntryValueUsdt > 0
                 ? Math.Round(position.EntryValueUsdt * (1m + position.RealizedPnlPct.Value / 100m), 4)
@@ -306,10 +327,16 @@ public class TrailingStopMonitorService(
 
         // Binance'e SELL emri — ÖNCE sat, SONRA kapat.
         // SAT başarısız olursa pozisyonu açık bırak; coin cüzdanda kalır ve izleme devam eder.
-        var coinQty = position.EntryQuantity;
+        //
+        // KRİTİK: EntryQuantity brüt alım miktarıdır — Binance komisyonu (%0.1) düşülmemiştir.
+        // Ayrıca her sembolün LOT_SIZE stepSize kuralı vardır. Ham miktarla emir gönderilirse
+        // "insufficient balance" veya "LOT_SIZE" hatası alınır ve pozisyon sonsuza dek açık kalır.
+        // ResolveSellQuantityAsync: cüzdan bakiyesiyle sınırlar + stepSize'a yuvarlar + minNotional doğrular.
+        var coinQty = await binance.ResolveSellQuantityAsync(
+            position.UserId, position.Coin.Symbol, position.EntryQuantity, currentPrice, ct);
+
         if (coinQty > 0)
         {
-            coinQty = Math.Floor(coinQty * 100_000_000m) / 100_000_000m;
             var sellResult = await binance.PlaceMarketOrderAsync(
                 position.UserId, position.Coin.Symbol, OrderSide.Sell, coinQty, ct);
 
@@ -347,36 +374,63 @@ public class TrailingStopMonitorService(
         }
         else
         {
-            // Coin miktarı 0 — fiyat bazlı P&L hesapla (sanal benzeri durum)
+            // Satılabilir miktar yok: cüzdan boş, toz bakiye veya minNotional altı.
+            // Geçici API hatası da bakiyeyi 0 gösterebilir — bu yüzden hemen kapatma,
+            // 1 saatten uzun süredir çözülemiyorsa fiyat bazlı kapat (sonsuz retry'ı önler).
+            var hoursOpen = (DateTime.UtcNow - position.OpenedAt).TotalHours;
+            if (hoursOpen < 1)
+            {
+                logger.LogWarning(
+                    "{Reason} satılamadı (satılabilir miktar yok) — {Symbol} açık bırakıldı, yeniden denenecek",
+                    exitReason, position.Coin.Symbol);
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+
+            logger.LogWarning(
+                "{Symbol} {Hours:F1}sa'dir satılamıyor (toz/minNotional altı) — fiyat bazlı kapatılıyor",
+                position.Coin.Symbol, hoursOpen);
+
             position.Status      = PositionStatus.Closed;
             position.ClosePrice  = currentPrice;
             position.ClosedAt    = DateTime.UtcNow;
-            position.CloseReason = exitReason.ToString();
+            position.CloseReason = "Unsellable";
             position.CloseValueUsdt = currentPrice * position.EntryQuantity;
             position.RealizedPnl    = Math.Round(((currentPrice - entry) / entry) * position.EntryValueUsdt, 4);
             position.RealizedPnlPct = Math.Round((currentPrice - entry) / entry * 100m, 4);
         }
 
-        var sellSignal = new TradeSignal
-        {
-            UserId = position.UserId,
-            CoinId = position.CoinId,
-            Timeframe = strategyCoin?.UserStrategy.Timeframe ?? "1h",
-            Direction = SignalDirection.Sell,
-            TotalScore = -1m,
-            CandleTime = DateTime.UtcNow,
-            Price = currentPrice,
-            IndicatorScores = $"{{\"exit\":\"{exitReason}\",\"entry\":{entry:F6},\"peak\":{peak:F6}}}",
-            IsActedUpon = true,
-        };
-
         if (strategyCoin is not null)
-        {
-            sellSignal.StrategyId = strategyCoin.UserStrategyId;
             strategyCoin.ReEntryState = ReEntryState.WaitingForSell;
+
+        // Volatile modda coin UserStrategyCoins'te bulunmaz (strategyCoin null olur);
+        // bu durumda pozisyonun kendi StrategyId'si kullanılır.
+        // StrategyId Guid.Empty kalırsa TradeSignals FK kısıtı ihlal edilir, SaveChanges
+        // patlar ve pozisyon ASLA kapanmaz — kayıt tutmak için kapanışı bloklamayalım.
+        var signalStrategyId = strategyCoin?.UserStrategyId ?? position.StrategyId ?? Guid.Empty;
+
+        if (signalStrategyId != Guid.Empty)
+        {
+            db.TradeSignals.Add(new TradeSignal
+            {
+                UserId = position.UserId,
+                CoinId = position.CoinId,
+                StrategyId = signalStrategyId,
+                Timeframe = strategyCoin?.UserStrategy.Timeframe ?? "1h",
+                Direction = SignalDirection.Sell,
+                TotalScore = -1m,
+                CandleTime = DateTime.UtcNow,
+                Price = currentPrice,
+                IndicatorScores = $"{{\"exit\":\"{exitReason}\",\"entry\":{entry:F6},\"peak\":{peak:F6}}}",
+                IsActedUpon = true,
+            });
+        }
+        else
+        {
+            logger.LogWarning("Geçerli StrategyId yok — {Symbol} için SAT sinyali kaydı atlandı (pozisyon yine de kapatıldı)",
+                position.Coin.Symbol);
         }
 
-        db.TradeSignals.Add(sellSignal);
         await db.SaveChangesAsync(ct);
 
         if (riskSettings?.TelegramEnabled == true

@@ -20,6 +20,7 @@ const schema = z.object({
   coinIds: z.array(z.number()),
   timeframe: z.string(),
   trailingStopPct: z.coerce.number().min(0.01).max(10),
+  trailingActivationPct: z.coerce.number().min(0).max(20).default(1.0),
   stopLossPct: z.coerce.number().min(0.01).max(10),
   takeProfitPct: z.coerce.number().min(0.1).max(1000).nullable().optional(),
   minVolumeUsdt: z.coerce.number().min(1000).nullable().optional(),
@@ -67,7 +68,8 @@ const DEFAULT_VALUES = (indicatorId?: number): FormData => ({
   coinIds: [],
   timeframe: '5m',
   trailingStopPct: 2.5,
-  stopLossPct: 2.0,
+  trailingActivationPct: 1.0,
+  stopLossPct: 3.0,
   takeProfitPct: null,
   minVolumeUsdt: null,
   volatilePositionSizePct: null,
@@ -244,6 +246,7 @@ export default function StrategyPage() {
                   coinIds: editing.coins.map(c => c.coinId),
                   timeframe: editing.timeframe,
                   trailingStopPct: editing.trailingStopPct,
+                  trailingActivationPct: editing.trailingActivationPct ?? 1.0,
                   stopLossPct: editing.stopLossPct,
                   takeProfitPct: editing.takeProfitPct ?? null,
                   minVolumeUsdt: editing.minVolumeUsdt ?? null,
@@ -722,6 +725,7 @@ function StrategyForm({
         coinIds: d.coinIds,
         timeframe: d.timeframe,
         trailingStopPct: d.trailingStopPct,
+        trailingActivationPct: d.trailingActivationPct,
         stopLossPct: d.stopLossPct,
         takeProfitPct: d.takeProfitPct ?? null,
         minVolumeUsdt: d.minVolumeUsdt ?? null,
@@ -822,6 +826,18 @@ function StrategyForm({
               Fiyat, ulaştığı en yüksek noktadan bu kadar % geri çekilirse pozisyon otomatik kapanır. Kârı korumak için kullanılır — <span className="text-yellow-400">küçük değer</span> kârı erken kilitler ama hareketin devamını kaçırma riski taşır, <span className="text-yellow-400">büyük değer</span> daha fazla yükselişe izin verir ama geri çekilmede daha çok kâr geri verir.
             </p>
             {errors.trailingStopPct && <p className="text-xs text-red-400 mt-0.5">{errors.trailingStopPct.message}</p>}
+          </div>
+          <div>
+            <label className="text-xs text-slate-400">Trailing Aktivasyon % (kâr eşiği)</label>
+            <div className="relative mt-1">
+              <input {...register('trailingActivationPct')} type="number" step="0.1" min="0" max="20"
+                className={inputCls} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">%</span>
+            </div>
+            <p className="text-xs text-slate-600 mt-1">
+              Trailing stop, pozisyon bu kâr yüzdesine ulaşmadan <span className="text-yellow-400">devreye girmez</span>. Girişten hemen sonraki normal dalgalanmada erken satışı önler. Ayrıca trailing tetiği asla giriş fiyatının altına inmez — yani trailing <span className="text-emerald-400">zararla satmaz</span>. <span className="text-slate-500">0 = girişten itibaren aktif (önerilmez).</span>
+            </p>
+            {errors.trailingActivationPct && <p className="text-xs text-red-400 mt-0.5">{errors.trailingActivationPct.message}</p>}
           </div>
           <div>
             <label className="text-xs text-slate-400">Stop Loss % (girişten düşüş)</label>

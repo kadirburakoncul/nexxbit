@@ -13,6 +13,7 @@ public record StrategyDto(
     string? IndicatorDisplayName,
     string Timeframe,
     decimal TrailingStopPct,
+    decimal TrailingActivationPct,
     decimal StopLossPct,
     decimal? TakeProfitPct,
     decimal? MinVolumeUsdt,
