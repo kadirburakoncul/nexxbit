@@ -72,6 +72,26 @@ export interface UpsertBistStrategyRequest {
   trailingActivationPct: number
 }
 
+
+export interface BistMomentumRow {
+  stockId: number
+  symbol: string
+  displayName: string
+  sector: string | null
+  lastPrice: number
+  lookbackChangePct: number
+  recentChangePct: number
+  rank: number
+  isSelected: boolean
+}
+
+export interface BistMomentumResult {
+  lookbackDays: number
+  topN: number
+  rows: BistMomentumRow[]
+  computedAt: string | null
+}
+
 export interface BistGainer {
   symbol: string
   displayName: string
@@ -105,6 +125,9 @@ export const bistApi = {
 
   index: () => api.get<{ symbol: string; price: number | null }>('/bist/index').then(r => r.data),
   topGainers: (count = 20) => api.get<BistGainer[]>('/bist/top-gainers', { params: { count } }).then(r => r.data),
+  momentum: (lookbackDays = 126, topN = 3) =>
+    api.get<BistMomentumResult>('/bist/momentum', { params: { lookbackDays, topN } }).then(r => r.data),
+
   chart: (symbol: string, timeframe = '15m', limit = 200) =>
     api.get<BistOhlcv[]>(`/bist/chart/${encodeURIComponent(symbol)}`, { params: { timeframe, limit } }).then(r => r.data),
 }

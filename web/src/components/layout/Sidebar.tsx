@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, TrendingUp, LineChart, Bell, Settings,
   Wifi, FlaskConical, Shield, Users, CandlestickChart, Terminal,
-  BarChart3, Cpu, Sliders, ClipboardList, Radar, Flame, BarChart2, PieChart
+  BarChart3, Cpu, Sliders, ClipboardList, Radar, Flame, BarChart2, PieChart, Trophy
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -16,6 +16,7 @@ const bistNavItems = [
   { to: '/bist/monitor',     icon: Radar,           label: 'Takip'        },
   { to: '/bist/chart',       icon: CandlestickChart,label: 'Grafik'       },
   { to: '/bist/stocks',      icon: BarChart2,       label: 'Hisseler'     },
+  { to: '/bist/momentum',    icon: Trophy,          label: 'Momentum'     },
 ]
 
 const navItems = [

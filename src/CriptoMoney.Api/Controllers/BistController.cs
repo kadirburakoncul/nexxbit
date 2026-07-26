@@ -280,6 +280,70 @@ public class BistController(IApplicationDbContext db, IBistDataService bistData)
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
+    // ─── Momentum / Relative Strength sıralaması ─────────────────────────────────
+    /// <summary>
+    /// Takip listesindeki hisseleri son N gündeki getirilerine göre sıralar.
+    ///
+    /// T3 stratejisinden farkı: "ne zaman girmeli" değil "hangisini tutmalı"
+    /// sorusuna cevap verir. Dönüş noktası aramaz, güçlü olanı tutup zayıfı bırakır.
+    ///
+    /// Varsayılan 126 gün (~6 ay): 19 hisse × 2 yıllık walk-forward ölçümünde
+    /// hem in-sample hem out-of-sample al-tut'u geçen tek istikrarlı pencere.
+    /// 3 aylık pencere out-of-sample'da al-tut'un altında kaldı.
+    /// </summary>
+    [HttpGet("momentum")]
+    public async Task<IActionResult> GetMomentum(
+        [FromQuery] int lookbackDays = 126,
+        [FromQuery] int topN = 3,
+        CancellationToken ct = default)
+    {
+        lookbackDays = Math.Clamp(lookbackDays, 20, 400);
+        topN = Math.Clamp(topN, 1, 20);
+
+        var stocks = await db.BistStocks.OrderBy(s => s.Symbol).ToListAsync(ct);
+        if (stocks.Count == 0) return Ok(new BistMomentumResultDto(lookbackDays, topN, [], null));
+
+        var rows = new List<BistMomentumRowDto>();
+
+        foreach (var stock in stocks)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            // lookback + tampon: tatiller nedeniyle bar sayısı takvim gününden az olur
+            var candles = await bistData.GetCandlesAsync(stock.Symbol, "1d", lookbackDays + 30, ct);
+            if (!candles.Succeeded || candles.Data is null || candles.Data.Count < lookbackDays / 2)
+                continue;
+
+            var data = candles.Data;
+            var last = data[^1];
+            var startIdx = Math.Max(0, data.Count - 1 - lookbackDays);
+            var start = data[startIdx];
+            if (start.Close <= 0) continue;
+
+            var changePct = (last.Close - start.Close) / start.Close * 100m;
+
+            // Kısa vadeli ivme: son ~1 ayın getirisi (momentum bozuluyor mu?)
+            var recentIdx = Math.Max(0, data.Count - 1 - 21);
+            var recentPct = data[recentIdx].Close > 0
+                ? (last.Close - data[recentIdx].Close) / data[recentIdx].Close * 100m
+                : 0m;
+
+            rows.Add(new BistMomentumRowDto(
+                stock.Id, stock.Symbol, stock.DisplayName, stock.Sector,
+                Math.Round(last.Close, 2),
+                Math.Round(changePct, 2),
+                Math.Round(recentPct, 2),
+                0, false));
+        }
+
+        var ranked = rows
+            .OrderByDescending(r => r.LookbackChangePct)
+            .Select((r, i) => r with { Rank = i + 1, IsSelected = i < topN })
+            .ToList();
+
+        return Ok(new BistMomentumResultDto(lookbackDays, topN, ranked, DateTime.UtcNow));
+    }
+
     private static BistIndicatorSettingDto ToIndicatorDto(BistIndicatorSetting s) =>
         new(s.T3Period, s.T3Factor, s.IsRsiFilterEnabled, s.RsiPeriod, s.RsiBuyThreshold);
 
@@ -327,4 +391,19 @@ public record BistStrategyStockDto(
 public record BistSignalDto(
     Guid Id, string Symbol, string DisplayName, string StrategyName,
     string Direction, decimal Price, DateTime CandleTime, string? Reason
+);
+
+public record BistMomentumRowDto(
+    int StockId, string Symbol, string DisplayName, string? Sector,
+    decimal LastPrice,
+    decimal LookbackChangePct,
+    decimal RecentChangePct,
+    int Rank,
+    bool IsSelected
+);
+
+public record BistMomentumResultDto(
+    int LookbackDays, int TopN,
+    List<BistMomentumRowDto> Rows,
+    DateTime? ComputedAt
 );

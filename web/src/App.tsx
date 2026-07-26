@@ -32,6 +32,7 @@ import BistSignalsPage from '@/pages/BistSignalsPage'
 import BistMonitorPage from '@/pages/BistMonitorPage'
 import BistChartPage from '@/pages/BistChartPage'
 import BistStocksPage from '@/pages/BistStocksPage'
+import BistMomentumPage from '@/pages/BistMomentumPage'
 import MarketSelectPage from '@/pages/MarketSelectPage'
 import TradingAnalysisPage from '@/pages/TradingAnalysisPage'
 import AnalyticsPage from '@/pages/AnalyticsPage'
@@ -84,6 +85,7 @@ export default function App() {
             <Route path="/bist/monitor" element={<BistMonitorPage />} />
             <Route path="/bist/chart" element={<BistChartPage />} />
             <Route path="/bist/stocks" element={<BistStocksPage />} />
+            <Route path="/bist/momentum" element={<BistMomentumPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
