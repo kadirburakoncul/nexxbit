@@ -91,12 +91,15 @@ public static class DependencyInjection
             "15 * * * *",
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 
-        // BIST seansı 10:00-18:10 TRT = 07:00-15:10 UTC — geniş bir pencerede 10dk'da bir dener,
-        // job kendi içinde tam seans saatini kontrol eder.
+        // BIST günlük periyotta çalışır: gün içinde günlük bar değişmediğinden
+        // seans boyunca 10dk'da bir taramak gereksizdi (günde ~50 boş tarama).
+        // 15:30 UTC = 18:30 TRT — seans kapanışından (18:00) sonra, Yahoo'nun
+        // ~15-20dk gecikmesini de karşılayacak şekilde tek tarama.
+        // Gün içi periyot seçen stratejiler job içinde seans kontrolünden geçer.
         manager.AddOrUpdate<BistSignalScanJob>(
             "bist-signal-scan",
             job => job.ExecuteAsync(CancellationToken.None),
-            "*/10 6-15 * * 1-5",
+            "30 15 * * 1-5",
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     }
 }

@@ -30,6 +30,11 @@ export interface BistStrategy {
   isRsiFilterEnabled: boolean
   rsiPeriod: number
   rsiBuyThreshold: number
+  useEma200Filter: boolean
+  isPositionTrackingEnabled: boolean
+  stopLossPct: number
+  trailingStopPct: number
+  trailingActivationPct: number
   stocks: BistStrategyStock[]
 }
 
@@ -60,6 +65,11 @@ export interface UpsertBistStrategyRequest {
   isRsiFilterEnabled: boolean
   rsiPeriod: number
   rsiBuyThreshold: number
+  useEma200Filter: boolean
+  isPositionTrackingEnabled: boolean
+  stopLossPct: number
+  trailingStopPct: number
+  trailingActivationPct: number
 }
 
 export interface BistGainer {

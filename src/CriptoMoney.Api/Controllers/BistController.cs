@@ -127,6 +127,11 @@ public class BistController(IApplicationDbContext db, IBistDataService bistData)
             IsActive = true,
             ActivatedAt = DateTime.UtcNow,
             IsRsiFilterEnabled = req.IsRsiFilterEnabled,
+            UseEma200Filter = req.UseEma200Filter,
+            IsPositionTrackingEnabled = req.IsPositionTrackingEnabled,
+            StopLossPct = Math.Clamp(req.StopLossPct, 0, 50),
+            TrailingStopPct = Math.Clamp(req.TrailingStopPct, 0, 50),
+            TrailingActivationPct = Math.Clamp(req.TrailingActivationPct, 0, 50),
             RsiPeriod = Math.Clamp(req.RsiPeriod, 2, 50),
             RsiBuyThreshold = Math.Clamp(req.RsiBuyThreshold, 0, 100),
         };
@@ -154,6 +159,11 @@ public class BistController(IApplicationDbContext db, IBistDataService bistData)
         strategy.Name = req.Name.Trim();
         strategy.Timeframe = req.Timeframe;
         strategy.IsRsiFilterEnabled = req.IsRsiFilterEnabled;
+        strategy.UseEma200Filter = req.UseEma200Filter;
+        strategy.IsPositionTrackingEnabled = req.IsPositionTrackingEnabled;
+        strategy.StopLossPct = Math.Clamp(req.StopLossPct, 0, 50);
+        strategy.TrailingStopPct = Math.Clamp(req.TrailingStopPct, 0, 50);
+        strategy.TrailingActivationPct = Math.Clamp(req.TrailingActivationPct, 0, 50);
         strategy.RsiPeriod = Math.Clamp(req.RsiPeriod, 2, 50);
         strategy.RsiBuyThreshold = Math.Clamp(req.RsiBuyThreshold, 0, 100);
 
@@ -276,6 +286,8 @@ public class BistController(IApplicationDbContext db, IBistDataService bistData)
     private static BistStrategyDto ToStrategyDto(BistStrategy s) => new(
         s.Id, s.Name, s.Timeframe, s.IsActive, s.ActivatedAt,
         s.IsRsiFilterEnabled, s.RsiPeriod, s.RsiBuyThreshold,
+        s.UseEma200Filter, s.IsPositionTrackingEnabled,
+        s.StopLossPct, s.TrailingStopPct, s.TrailingActivationPct,
         s.StrategyStocks.Select(ss => new BistStrategyStockDto(
             ss.BistStockId, ss.BistStock.Symbol, ss.BistStock.DisplayName,
             ss.LastPrice, ss.LastPriceAt, ss.LastT3UpDirection, ss.LastCheckedAt, ss.LastCheckedReason
@@ -291,12 +303,18 @@ public record BistIndicatorSettingDto(
 
 public record UpsertBistStrategyRequest(
     string Name, string Timeframe, List<int> StockIds,
-    bool IsRsiFilterEnabled = false, int RsiPeriod = 14, decimal RsiBuyThreshold = 50
+    bool IsRsiFilterEnabled = false, int RsiPeriod = 14, decimal RsiBuyThreshold = 50,
+    bool UseEma200Filter = true,
+    bool IsPositionTrackingEnabled = true,
+    decimal StopLossPct = 8m, decimal TrailingStopPct = 8m,
+    decimal TrailingActivationPct = 5m
 );
 
 public record BistStrategyDto(
     Guid Id, string Name, string Timeframe, bool IsActive, DateTime? ActivatedAt,
     bool IsRsiFilterEnabled, int RsiPeriod, decimal RsiBuyThreshold,
+    bool UseEma200Filter, bool IsPositionTrackingEnabled,
+    decimal StopLossPct, decimal TrailingStopPct, decimal TrailingActivationPct,
     List<BistStrategyStockDto> Stocks
 );
 

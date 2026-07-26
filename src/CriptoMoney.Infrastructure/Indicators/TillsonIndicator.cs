@@ -59,10 +59,19 @@ public class TillsonIndicator : IIndicator
     {
         var k = 2m / (period + 1);
         var f2 = factor * factor;
-        var c1 = -(f2 * factor);
-        var c2 = 3m * f2 + 3m * f2 * factor;
-        var c3 = -6m * f2 - 3m * factor - 3m * f2 * factor;
-        var c4 = 1m + 3m * factor + f2 + 3m * f2 * factor;
+        var f3 = f2 * factor;
+
+        // Tillson T3 katsayıları — TOPLAMLARI 1.0 OLMALIDIR (ağırlıklı ortalama).
+        // Önceki kodda c4'te iki terim yer değiştirmişti (v² ↔ v³):
+        //     c4 = 1 + 3v + v² + 3v³   → katsayı toplamı 0.706
+        // Bu yüzden T3, gerçek değerin yalnızca %70.6'sını üretiyordu; fiyatla
+        // karşılaştıran her yer (Calculate'teki deviation/crossedUp, skor tabanlı
+        // backtest) sürekli "BUY" veriyordu.
+        //     doğrusu: c4 = 1 + 3v + v³ + 3v²  → toplam 1.000
+        var c1 = -f3;
+        var c2 = 3m * f2 + 3m * f3;
+        var c3 = -6m * f2 - 3m * factor - 3m * f3;
+        var c4 = 1m + 3m * factor + f3 + 3m * f2;
 
         var n = closes.Length;
         var e1 = new decimal[n];

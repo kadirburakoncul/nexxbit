@@ -6,7 +6,9 @@ import type { BistStrategy, BistCatalogStock } from '@/api/bist'
 import { Plus, Pencil, Trash2, Power, X, Check, AlertCircle, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const TIMEFRAMES = ['5m', '15m', '30m', '1h', '1d']
+// 4h bilinçli olarak yok: Yahoo'nun BIST 4h barları seansla hizasız
+// (09:30/13:30/17:30 TRT + 30dk'lık artık bar). Günlük varsayılan.
+const TIMEFRAMES = ['1d', '1h', '30m', '15m', '5m']
 
 const inputCls =
   'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-yellow-400/50'
@@ -106,7 +108,7 @@ export default function BistStrategyPage() {
             catalog={catalog ?? []}
             watchlist={watchlist ?? []}
             initialName={editing?.name ?? ''}
-            initialTimeframe={editing?.timeframe ?? '15m'}
+            initialTimeframe={editing?.timeframe ?? '1d'}
             initialStockIds={editing?.stocks.map(s => s.stockId) ?? []}
             initialRsiEnabled={editing?.isRsiFilterEnabled ?? false}
             initialRsiPeriod={editing?.rsiPeriod ?? 14}
@@ -120,7 +122,17 @@ export default function BistStrategyPage() {
               ?? (updateMut.error as any)?.response?.data?.message
             }
             onSubmit={({ name, timeframe, stockIds, isRsiFilterEnabled, rsiPeriod, rsiBuyThreshold }) => {
-              const req = { name, timeframe, stockIds, isRsiFilterEnabled, rsiPeriod, rsiBuyThreshold }
+              // Formda henüz alanı olmayan ayarlar mevcut değerleriyle geri gönderilir;
+              // aksi halde backend record varsayılanları uygulanır ve kullanıcının
+              // ayarı her düzenlemede sıfırlanır.
+              const req = {
+                name, timeframe, stockIds, isRsiFilterEnabled, rsiPeriod, rsiBuyThreshold,
+                useEma200Filter: editing?.useEma200Filter ?? true,
+                isPositionTrackingEnabled: editing?.isPositionTrackingEnabled ?? true,
+                stopLossPct: editing?.stopLossPct ?? 8,
+                trailingStopPct: editing?.trailingStopPct ?? 8,
+                trailingActivationPct: editing?.trailingActivationPct ?? 5,
+              }
               if (editing) updateMut.mutate({ id: editing.id, req })
               else createMut.mutate(req)
             }}
