@@ -18,7 +18,7 @@ public record UpsertStrategyCommand(
     decimal? VolatilePositionSizePct = null,
     decimal VolatileMinChangePct = 5.0m,
     int VolatileGainerLimit = 20,
-    bool IsRsiFilterEnabled = false,
+    bool IsRsiFilterEnabled = true,
     int MomentumFreshFilterMinutes = 5,
     // ATR
     bool UseAtrBasedStops = false,
@@ -36,26 +36,26 @@ public record UpsertStrategyCommand(
     // EMA200 filtresi
     bool IsEma200RuleEnabled = true,
     // Koruma ayarları
-    int MaxHoldHours = 8,
+    int MaxHoldHours = 24,
     int SlCooldownHours = 4,
     bool IsGreenCandleFilterEnabled = true,
     // Pozisyon limitleri
-    int MaxOpenPositions = 5,
+    int MaxOpenPositions = 3,
     decimal? MaxPositionSizeUsdt = null,
     decimal? MaxPositionSizePct = null,
     decimal MinPositionSizeUsdt = 10m,
     // ADX filtresi
-    bool UseAdxFilter = false,
+    bool UseAdxFilter = true,
     int AdxPeriod = 14,
     decimal AdxMinValue = 25m,
     // MACD filtresi
-    bool UseMacdFilter = false,
+    bool UseMacdFilter = true,
     // Breakeven stop
-    bool UseBreakevenStop = false,
+    bool UseBreakevenStop = true,
     decimal BreakevenTriggerPct = 1.5m,
     decimal TrailingActivationPct = 1.0m,
     decimal RsiMaxValue = 75m,
-    bool UseHigherTfConfirm = false,
+    bool UseHigherTfConfirm = true,
     string HigherTimeframe = "1h",
     bool UseRiskBasedSizing = false,
     decimal RiskPerTradePct = 1.0m,

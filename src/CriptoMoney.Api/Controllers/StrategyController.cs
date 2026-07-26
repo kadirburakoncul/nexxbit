@@ -232,7 +232,7 @@ public class UpsertStrategyRequest
     public decimal TrailingStopPct { get; set; }
     public decimal TrailingActivationPct { get; set; } = 1.0m;
     public decimal RsiMaxValue { get; set; } = 75m;
-    public bool UseHigherTfConfirm { get; set; } = false;
+    public bool UseHigherTfConfirm { get; set; } = true;
     public string HigherTimeframe { get; set; } = "1h";
     public bool UseRiskBasedSizing { get; set; } = false;
     public decimal RiskPerTradePct { get; set; } = 1.0m;
@@ -245,7 +245,7 @@ public class UpsertStrategyRequest
     public bool IsVolatileMode { get; set; } = false;
     public decimal VolatileMinChangePct { get; set; } = 3.0m;
     public int VolatileGainerLimit { get; set; } = 20;
-    public bool IsRsiFilterEnabled { get; set; } = false;
+    public bool IsRsiFilterEnabled { get; set; } = true;
     public int MomentumFreshFilterMinutes { get; set; } = 5;
     public bool UseAtrBasedStops { get; set; } = false;
     public int AtrPeriod { get; set; } = 14;
@@ -265,12 +265,12 @@ public class UpsertStrategyRequest
     public decimal? MaxPositionSizePct { get; set; }
     public decimal MinPositionSizeUsdt { get; set; } = 10m;
     // ADX filtresi
-    public bool UseAdxFilter { get; set; } = false;
+    public bool UseAdxFilter { get; set; } = true;
     public int AdxPeriod { get; set; } = 14;
     public decimal AdxMinValue { get; set; } = 25m;
     // MACD filtresi
-    public bool UseMacdFilter { get; set; } = false;
+    public bool UseMacdFilter { get; set; } = true;
     // Breakeven stop
-    public bool UseBreakevenStop { get; set; } = false;
+    public bool UseBreakevenStop { get; set; } = true;
     public decimal BreakevenTriggerPct { get; set; } = 1.5m;
 }
