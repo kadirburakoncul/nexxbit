@@ -32,7 +32,12 @@ public static class DatabaseSeeder
 
     private static async Task SeedIndicatorsAsync(AppDbContext context)
     {
-        if (await context.Indicators.AnyAsync()) return;
+        // Eskiden tablo doluysa hiç çalışmıyordu; bu yüzden sonradan eklenen
+        // indikatörler mevcut kurulumlara hiç ulaşmıyordu. Artık yalnızca
+        // EKSİK olanlar eklenir — var olanlara ve kullanıcı ayarlarına dokunulmaz.
+        var existingNames = await context.Indicators
+            .Select(i => i.Name)
+            .ToListAsync();
 
         var indicators = new List<Indicator>
         {
@@ -78,7 +83,13 @@ public static class DatabaseSeeder
             ],
         });
 
-        await context.Indicators.AddRangeAsync(indicators);
+        var missing = indicators
+            .Where(i => !existingNames.Contains(i.Name, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        if (missing.Count == 0) return;
+
+        await context.Indicators.AddRangeAsync(missing);
         await context.SaveChangesAsync();
     }
 }
