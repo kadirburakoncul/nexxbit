@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Domain.Enums;
 using CriptoMoney.Infrastructure.Services;
@@ -17,6 +18,12 @@ public class IndicatorOptimizationJob(
     IIndicatorOptimizer optimizer,
     ILogger<IndicatorOptimizationJob> logger)
 {
+    private static readonly JsonSerializerOptions CamelCase = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+    };
+
     public async Task ExecuteAsync(Guid optimizationId, CancellationToken ct = default)
     {
         var run = await db.IndicatorOptimizations.FirstOrDefaultAsync(o => o.Id == optimizationId, ct);
@@ -92,7 +99,9 @@ public class IndicatorOptimizationJob(
             var best = results[0];
 
             run.TestedCombinations = results.Count;
-            run.ResultsJson = JsonSerializer.Serialize(results.Take(50));
+            // Frontend camelCase bekliyor (API genelinde olduğu gibi);
+            // varsayılan serileştirme PascalCase üretip alanları eşleşmez hale getiriyordu.
+            run.ResultsJson = JsonSerializer.Serialize(results.Take(50), CamelCase);
             run.BestParamsJson = JsonSerializer.Serialize(best.Parameters);
             run.BestReturnPct = best.ReturnPct;
             run.BestWinRate = best.WinRate;
@@ -143,25 +152,25 @@ public class IndicatorOptimizationJob(
         if (!beatsHold)
         {
             parts.Add($"KULLANMAYIN: En iyi kombinasyon bile al-tut'un altında kaldı "
-                    + $"(strateji {b.ReturnPct:+0.0;-0.0}%, al-tut {b.BuyHoldPct:+0.0;-0.0}%). "
+                    + $"(strateji {b.ReturnPct:+0.0;-0.0;0.0}%, al-tut {b.BuyHoldPct:+0.0;-0.0;0.0}%). "
                     + "Bu veri setinde bu indikatör ailesi değer katmıyor.");
         }
         else if (isOk && oosOk && majority)
         {
-            parts.Add($"UMUT VERİCİ: Al-tut'u {b.EdgePct:+0.0} puan geçti, her iki zaman diliminde de "
-                    + $"pozitif (ilk dönem {b.InSamplePct:+0.0}%, ikinci dönem {b.OutOfSamplePct:+0.0}%) "
+            parts.Add($"UMUT VERİCİ: Al-tut'u {b.EdgePct:+0.0;-0.0;0.0} puan geçti, her iki zaman diliminde de "
+                    + $"pozitif (ilk dönem {b.InSamplePct:+0.0;-0.0;0.0}%, ikinci dönem {b.OutOfSamplePct:+0.0;-0.0;0.0}%) "
                     + $"ve {b.SymbolCount} coinin {b.SymbolsBeatingBuyHold} tanesinde al-tut'u geçti.");
         }
         else if (!oosOk)
         {
-            parts.Add($"ŞÜPHELİ: İlk dönemde {b.InSamplePct:+0.0}% kazandırmış ama ikinci dönemde "
-                    + $"{b.OutOfSamplePct:+0.0}%. Bu, parametrelerin geçmişe aşırı uydurulduğunun "
+            parts.Add($"ŞÜPHELİ: İlk dönemde {b.InSamplePct:+0.0;-0.0;0.0}% kazandırmış ama ikinci dönemde "
+                    + $"{b.OutOfSamplePct:+0.0;-0.0;0.0}%. Bu, parametrelerin geçmişe aşırı uydurulduğunun "
                     + "(overfit) klasik işaretidir.");
         }
         else
         {
-            parts.Add($"KARARSIZ: Al-tut'u {b.EdgePct:+0.0} puan geçiyor ama sonuç tutarlı değil "
-                    + $"(ilk dönem {b.InSamplePct:+0.0}%, ikinci dönem {b.OutOfSamplePct:+0.0}%, "
+            parts.Add($"KARARSIZ: Al-tut'u {b.EdgePct:+0.0;-0.0;0.0} puan geçiyor ama sonuç tutarlı değil "
+                    + $"(ilk dönem {b.InSamplePct:+0.0;-0.0;0.0}%, ikinci dönem {b.OutOfSamplePct:+0.0;-0.0;0.0}%, "
                     + $"{b.SymbolCount} coinin {b.SymbolsBeatingBuyHold} tanesinde üstün).");
         }
 

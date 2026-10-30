@@ -256,15 +256,26 @@ public class MarketDataExportJob(
             var f5  = Forward(c, i, 5);
             var f10 = Forward(c, i, 10);
 
+            // Isınma tamamlanmadan indikatör değeri yoktur. 0 yazmak yanıltıcıdır —
+            // analiz araçları bunu gerçek bir ölçüm sanar ve ortalamaları bozar.
+            // Hesaplanamayan hücre BOŞ bırakılır (CSV'de ,, / JSON'da null).
+            var warm = i >= 60;
+            var fwdOk1  = i + 1  < n;
+            var fwdOk5  = i + 5  < n;
+            var fwdOk10 = i + 10 < n;
+
             yield return string.Join(',',
                 symbol, tf, k.OpenTime.ToString("yyyy-MM-dd HH:mm:ss", Inv),
                 F(k.Open), F(k.High), F(k.Low), F(k.Close),
                 F(k.Volume), F(k.QuoteVolume), k.TradeCount.ToString(Inv),
-                F(retPct), F(rangePct), F(bodyPct),
-                F(ema20[i]), F(ema50[i]), F(ema200[i]), F(rsi[i]), F(atr), F(atrPct),
-                F(macd), F(macdSig), F(macdHist), F(adx), F(pdi), F(mdi), F(t3[i]),
-                F(volRatio),
-                F(f1), F(f5), F(f10));
+                i > 0 ? F(retPct) : "", F(rangePct), F(bodyPct),
+                FN(ema20[i], i >= 19), FN(ema50[i], i >= 49), FN(ema200[i], i >= 199),
+                FN(rsi[i], i >= 14), FN(atr, warm), FN(atrPct, warm),
+                FN(macd, warm), FN(macdSig, warm), FN(macdHist, warm),
+                FN(adx, warm), FN(pdi, warm), FN(mdi, warm),
+                FN(t3[i], i >= 30),
+                FN(volRatio, i >= 20),
+                FN(f1, fwdOk1), FN(f5, fwdOk5), FN(f10, fwdOk10));
         }
     }
 
@@ -276,4 +287,7 @@ public class MarketDataExportJob(
     }
 
     private static string F(decimal v) => Math.Round(v, 8).ToString(Inv);
+
+    /// <summary>Değer geçerliyse yazar, değilse hücreyi boş bırakır.</summary>
+    private static string FN(decimal v, bool valid) => valid ? F(v) : string.Empty;
 }
