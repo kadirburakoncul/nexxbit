@@ -19,6 +19,7 @@ public static class DependencyInjection
         services.AddHttpClient("telegram").ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler());
         services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
         services.AddScoped<IMarketDataService, MarketDataService>();
+        services.AddSingleton<IIndicatorDiscovery, IndicatorDiscovery>();
         services.AddSingleton<IIndicatorOptimizer, IndicatorOptimizer>();
         services.AddSingleton<IEncryptionService, EncryptionService>();
         services.AddScoped<IBinanceService, BinanceService>();
@@ -37,6 +38,7 @@ public static class DependencyInjection
         // İndikatörler — sadece Level1 (T3 tabanlı) aktif
         services.AddSingleton<IIndicator, Level1Indicator>();
         services.AddSingleton<IIndicator, RsiIndicator>();
+        services.AddSingleton<IIndicator, CustomRuleIndicator>();
         services.AddSingleton<IIndicatorRegistry, IndicatorRegistry>();
         services.AddScoped<ISignalEngine, SignalEngine>();
         services.AddScoped<IBacktestEngine, BacktestEngine>();

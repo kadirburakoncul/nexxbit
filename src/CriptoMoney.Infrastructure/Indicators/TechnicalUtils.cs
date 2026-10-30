@@ -177,4 +177,123 @@ public static class TechnicalUtils
 
         return (lastMacd, lastSignal, lastMacd - lastSignal, prevHist);
     }
+
+    // ─── Tam seri (O(n)) sürümler ────────────────────────────────────────────────
+    // Yukarıdaki metotlar tek bir "son değer" döndürür. Her bar için ayrı ayrı
+    // çağrılırsa maliyet O(n²) olur — binlerce barda indikatör araması bunu kaldıramaz.
+    // Aşağıdakiler aynı hesabı tek geçişte, her bar için üretir.
+
+    /// <summary>Her bar için Wilder ATR. Isınmamış barlarda 0 döner.</summary>
+    public static decimal[] ComputeAtrSeries(IReadOnlyList<CandleInput> candles, int period = 14)
+    {
+        var n = candles.Count;
+        var atr = new decimal[n];
+        if (n < period + 2) return atr;
+
+        var tr = new decimal[n];
+        for (var i = 1; i < n; i++)
+        {
+            var hl  = candles[i].High - candles[i].Low;
+            var hpc = Math.Abs(candles[i].High - candles[i - 1].Close);
+            var lpc = Math.Abs(candles[i].Low  - candles[i - 1].Close);
+            tr[i] = Math.Max(hl, Math.Max(hpc, lpc));
+        }
+
+        decimal sum = 0;
+        for (var i = 1; i <= period; i++) sum += tr[i];
+        atr[period] = sum / period;
+
+        for (var i = period + 1; i < n; i++)
+            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+
+        return atr;
+    }
+
+    /// <summary>Her bar için ADX, +DI ve -DI. Isınmamış barlarda 0 döner.</summary>
+    public static (decimal[] adx, decimal[] plusDi, decimal[] minusDi) ComputeAdxSeries(
+        IReadOnlyList<CandleInput> candles, int period = 14)
+    {
+        var n = candles.Count;
+        var adx = new decimal[n];
+        var pdiArr = new decimal[n];
+        var mdiArr = new decimal[n];
+        if (n < period * 2 + 2) return (adx, pdiArr, mdiArr);
+
+        var plusDm = new decimal[n];
+        var minusDm = new decimal[n];
+        var tr = new decimal[n];
+
+        for (var i = 1; i < n; i++)
+        {
+            var upMove   = candles[i].High - candles[i - 1].High;
+            var downMove = candles[i - 1].Low - candles[i].Low;
+            plusDm[i]  = upMove   > downMove && upMove   > 0 ? upMove   : 0;
+            minusDm[i] = downMove > upMove   && downMove > 0 ? downMove : 0;
+
+            var hl  = candles[i].High - candles[i].Low;
+            var hpc = Math.Abs(candles[i].High - candles[i - 1].Close);
+            var lpc = Math.Abs(candles[i].Low  - candles[i - 1].Close);
+            tr[i] = Math.Max(hl, Math.Max(hpc, lpc));
+        }
+
+        decimal trS = 0, pS = 0, mS = 0;
+        for (var i = 1; i <= period; i++) { trS += tr[i]; pS += plusDm[i]; mS += minusDm[i]; }
+
+        var dxSeed = new List<decimal>(period);
+        decimal adxVal = 0;
+
+        for (var i = period + 1; i < n; i++)
+        {
+            trS = trS - trS / period + tr[i];
+            pS  = pS  - pS  / period + plusDm[i];
+            mS  = mS  - mS  / period + minusDm[i];
+
+            var pdi = trS > 0 ? pS / trS * 100m : 0;
+            var mdi = trS > 0 ? mS / trS * 100m : 0;
+            pdiArr[i] = pdi;
+            mdiArr[i] = mdi;
+
+            var dx = (pdi + mdi) > 0 ? Math.Abs(pdi - mdi) / (pdi + mdi) * 100m : 0;
+
+            // Wilder: ADX ilk `period` DX'in ortalamasıyla başlatılır
+            if (dxSeed.Count < period)
+            {
+                dxSeed.Add(dx);
+                if (dxSeed.Count == period) adxVal = dxSeed.Average();
+            }
+            else
+            {
+                adxVal = (adxVal * (period - 1) + dx) / period;
+            }
+            adx[i] = adxVal;
+        }
+
+        return (adx, pdiArr, mdiArr);
+    }
+
+    /// <summary>Her bar için MACD histogramı. Isınmamış barlarda 0 döner.</summary>
+    public static decimal[] ComputeMacdHistSeries(
+        decimal[] closes, int fast = 12, int slow = 26, int signalPeriod = 9)
+    {
+        var n = closes.Length;
+        var hist = new decimal[n];
+        if (n < slow + signalPeriod + 1) return hist;
+
+        var emaFast = ComputeEma(closes, fast);
+        var emaSlow = ComputeEma(closes, slow);
+
+        var macdLine = new decimal[n];
+        for (var i = slow - 1; i < n; i++) macdLine[i] = emaFast[i] - emaSlow[i];
+
+        var slice = macdLine.Skip(slow - 1).ToArray();
+        var signalArr = ComputeEma(slice, signalPeriod);
+
+        for (var i = 0; i < signalArr.Length; i++)
+        {
+            var target = i + slow - 1;
+            if (signalArr[i] != 0) hist[target] = slice[i] - signalArr[i];
+        }
+
+        return hist;
+    }
 }

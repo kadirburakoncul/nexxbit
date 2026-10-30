@@ -232,6 +232,11 @@ public class MarketDataController(
         if (run.Status != MarketDataExportStatus.Completed || run.BestParamsJson is null)
             return BadRequest(new { errors = new[] { "Optimizasyon tamamlanmamış." } });
 
+        // AUTO ailesinde taşınan şey parametre değil, kuralın kendisi.
+        // Kural, CustomRule indikatörünün RuleJson parametresine yazılır.
+        if (run.IndicatorFamily.Equals("AUTO", StringComparison.OrdinalIgnoreCase))
+            return await ApplyDiscoveredRuleAsync(run, req.RuleJson, ct);
+
         var paramsToApply = req.Parameters is { Count: > 0 }
             ? req.Parameters
             : JsonSerializer.Deserialize<Dictionary<string, decimal>>(run.BestParamsJson) ?? [];
@@ -340,6 +345,81 @@ public class MarketDataController(
     }
 
     /// <summary>
+    /// Keşfedilen kuralı kullanıcının "Kendi İndikatörüm" ayarına yazar.
+    /// Kuralın kendisi JSON olarak saklanır; CustomRuleIndicator bunu okuyup çalıştırır.
+    /// </summary>
+    private async Task<IActionResult> ApplyDiscoveredRuleAsync(
+        IndicatorOptimization run, string? explicitRuleJson, CancellationToken ct)
+    {
+        var ruleJson = string.IsNullOrWhiteSpace(explicitRuleJson) ? run.BestParamsJson : explicitRuleJson;
+        if (string.IsNullOrWhiteSpace(ruleJson))
+            return BadRequest(new { errors = new[] { "Uygulanacak kural bulunamadı." } });
+
+        var indicator = await db.Indicators
+            .Include(i => i.ParameterDefinitions)
+            .FirstOrDefaultAsync(i => i.Name == "CustomRule", ct);
+
+        if (indicator is null)
+            return NotFound(new
+            {
+                errors = new[] { "CustomRule indikatörü kayıtlı değil — veritabanı seed'i eksik olabilir." }
+            });
+
+        var def = indicator.ParameterDefinitions.FirstOrDefault(d => d.ParameterKey == "RuleJson");
+        if (def is null)
+            return NotFound(new { errors = new[] { "CustomRule indikatörünün RuleJson parametresi tanımlı değil." } });
+
+        var setting = await db.UserIndicatorSettings
+            .Include(s => s.ParameterValues)
+            .FirstOrDefaultAsync(s => s.UserId == CurrentUserId && s.IndicatorId == indicator.Id && s.CoinId == null, ct);
+
+        if (setting is null)
+        {
+            setting = new UserIndicatorSetting
+            {
+                UserId = CurrentUserId,
+                IndicatorId = indicator.Id,
+                IsEnabled = true,
+            };
+            db.UserIndicatorSettings.Add(setting);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var existing = setting.ParameterValues.FirstOrDefault(v => v.ParameterDefinitionId == def.Id);
+        if (existing is null)
+        {
+            db.UserIndicatorParameterValues.Add(new UserIndicatorParameterValue
+            {
+                UserIndicatorSettingId = setting.Id,
+                ParameterDefinitionId = def.Id,
+                Value = ruleJson,
+            });
+        }
+        else
+        {
+            existing.Value = ruleJson;
+        }
+
+        setting.IsEnabled = true;
+        await db.SaveChangesAsync(ct);
+
+        var rule = Infrastructure.Services.DiscoveredRule.FromJson(ruleJson);
+        var text = rule is null
+            ? "(kural çözümlenemedi)"
+            : string.Join(" VE ", rule.Conditions.Select(Infrastructure.Services.FeatureSet.Describe));
+
+        return Ok(new
+        {
+            indicator = "CustomRule",
+            applied = new[] { text },
+            skipped = Array.Empty<string>(),
+            message = $"Kendi indikatörünüz kaydedildi: {text}. "
+                    + "İndikatörler sayfasında \"Kendi İndikatörüm\" olarak görünür; "
+                    + "Analiz ve Backtest'te kullanabilirsiniz."
+        });
+    }
+
+    /// <summary>
     /// Kayıtlı sonuç listesini biçimden bağımsız okur. Bozuk/eski bir kayıt
     /// tüm sayfayı çökertmemeli — çözümlenemezse boş liste döner.
     /// </summary>
@@ -416,7 +496,7 @@ public record IndicatorOptimizationDto(
     decimal? BuyHoldReturnPct, decimal? InSampleReturnPct, decimal? OutOfSampleReturnPct,
     string? Verdict, string? ErrorMessage, DateTime CreatedAt, DateTime? CompletedAt);
 
-public record ApplyIndicatorRequest(Dictionary<string, decimal>? Parameters);
+public record ApplyIndicatorRequest(Dictionary<string, decimal>? Parameters, string? RuleJson = null);
 
 /// <summary>Optimizasyon sonucunun API'ye dönen biçimi (kayıtlı JSON buna okunur).</summary>
 public record OptimizationResultDto(
@@ -432,4 +512,6 @@ public record OptimizationResultDto(
     decimal InSamplePct,
     decimal OutOfSamplePct,
     int SymbolsBeatingBuyHold,
-    int SymbolCount);
+    int SymbolCount,
+    /// <summary>Yalnızca AUTO ailesinde dolu — keşfedilen kuralın tanımı.</summary>
+    string? RuleJson = null);

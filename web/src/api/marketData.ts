@@ -91,6 +91,8 @@ export interface OptimizationCandidate {
   outOfSamplePct: number
   symbolsBeatingBuyHold: number
   symbolCount: number
+  /** Yalnızca AUTO ailesinde dolu — keşfedilen kuralın tanımı */
+  ruleJson: string | null
 }
 
 export const marketDataApi = {
@@ -120,7 +122,8 @@ export const marketDataApi = {
     marketDataExportId?: string | null
   }) => api.post<IndicatorOptimization>('/marketdata/optimizations', req).then(r => r.data),
   deleteOptimization: (id: string) => api.delete(`/marketdata/optimizations/${id}`),
-  applyIndicator: (id: string, parameters?: Record<string, number>) =>
-    api.post<{ indicator: string; applied: string[]; message: string }>(
-      `/marketdata/optimizations/${id}/apply`, { parameters: parameters ?? null }).then(r => r.data),
+  applyIndicator: (id: string, parameters?: Record<string, number>, ruleJson?: string | null) =>
+    api.post<{ indicator: string; applied: string[]; skipped: string[]; message: string }>(
+      `/marketdata/optimizations/${id}/apply`,
+      { parameters: parameters ?? null, ruleJson: ruleJson ?? null }).then(r => r.data),
 }

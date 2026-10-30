@@ -102,7 +102,8 @@ public class IndicatorOptimizationJob(
             // Frontend camelCase bekliyor (API genelinde olduğu gibi);
             // varsayılan serileştirme PascalCase üretip alanları eşleşmez hale getiriyordu.
             run.ResultsJson = JsonSerializer.Serialize(results.Take(50), CamelCase);
-            run.BestParamsJson = JsonSerializer.Serialize(best.Parameters);
+            // AUTO'da parametre sözlüğü boştur; taşınan şey kuralın kendisidir.
+            run.BestParamsJson = best.RuleJson ?? JsonSerializer.Serialize(best.Parameters);
             run.BestReturnPct = best.ReturnPct;
             run.BestWinRate = best.WinRate;
             run.BestTradeCount = best.TradeCount;
@@ -149,6 +150,10 @@ public class IndicatorOptimizationJob(
 
         var parts = new List<string>();
 
+        var isAuto = b.Family.Equals("AUTO", StringComparison.OrdinalIgnoreCase);
+        var firstLabel  = isAuto ? "doğrulama seti" : "ilk dönem";
+        var secondLabel = isAuto ? "test seti" : "ikinci dönem";
+
         if (!beatsHold)
         {
             parts.Add($"KULLANMAYIN: En iyi kombinasyon bile al-tut'un altında kaldı "
@@ -158,23 +163,27 @@ public class IndicatorOptimizationJob(
         else if (isOk && oosOk && majority)
         {
             parts.Add($"UMUT VERİCİ: Al-tut'u {b.EdgePct:+0.0;-0.0;0.0} puan geçti, her iki zaman diliminde de "
-                    + $"pozitif (ilk dönem {b.InSamplePct:+0.0;-0.0;0.0}%, ikinci dönem {b.OutOfSamplePct:+0.0;-0.0;0.0}%) "
+                    + $"pozitif ({firstLabel} {b.InSamplePct:+0.0;-0.0;0.0}%, {secondLabel} {b.OutOfSamplePct:+0.0;-0.0;0.0}%) "
                     + $"ve {b.SymbolCount} coinin {b.SymbolsBeatingBuyHold} tanesinde al-tut'u geçti.");
         }
         else if (!oosOk)
         {
-            parts.Add($"ŞÜPHELİ: İlk dönemde {b.InSamplePct:+0.0;-0.0;0.0}% kazandırmış ama ikinci dönemde "
+            parts.Add($"ŞÜPHELİ: {firstLabel}nde {b.InSamplePct:+0.0;-0.0;0.0}% kazandırmış ama {secondLabel}nde "
                     + $"{b.OutOfSamplePct:+0.0;-0.0;0.0}%. Bu, parametrelerin geçmişe aşırı uydurulduğunun "
                     + "(overfit) klasik işaretidir.");
         }
         else
         {
             parts.Add($"KARARSIZ: Al-tut'u {b.EdgePct:+0.0;-0.0;0.0} puan geçiyor ama sonuç tutarlı değil "
-                    + $"(ilk dönem {b.InSamplePct:+0.0;-0.0;0.0}%, ikinci dönem {b.OutOfSamplePct:+0.0;-0.0;0.0}%, "
+                    + $"({firstLabel} {b.InSamplePct:+0.0;-0.0;0.0}%, {secondLabel} {b.OutOfSamplePct:+0.0;-0.0;0.0}%, "
                     + $"{b.SymbolCount} coinin {b.SymbolsBeatingBuyHold} tanesinde üstün).");
         }
 
-        parts.Add($"{combinationCount} kombinasyon denendi — ne kadar çok denenirse, "
+        parts.Add(isAuto
+            ? $"{combinationCount} aday kural üretildi — veri üçe bölündü: kurallar eğitim setinde arandı, "
+              + "en iyiler doğrulama setinde seçildi, test seti seçime hiç karışmadı. "
+              + "Raporlanan test sonucu bu yüzden daha güvenilirdir ama yine de garanti değildir."
+            : $"{combinationCount} kombinasyon denendi — ne kadar çok denenirse, "
                 + "şans eseri iyi görünen bir ayar bulma ihtimali o kadar artar. "
                 + "Gerçek parayla kullanmadan önce farklı bir tarih aralığında tekrar ölçün.");
 

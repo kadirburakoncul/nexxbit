@@ -53,6 +53,31 @@ public static class DatabaseSeeder
             }
         };
 
+        // Keşif motorunun ürettiği özel kural buraya yazılır. Sabit bir formülü
+        // olmadığı için tek parametresi kuralın kendisidir (JSON).
+        indicators.Add(new Indicator
+        {
+            Name = "CustomRule",
+            DisplayName = "Kendi İndikatörüm (keşfedilen kural)",
+            Description = "Veri & Lab sayfasındaki otomatik keşiften çıkan özel kural. "
+                        + "Hazır bir formül değildir; koşulların tamamı sağlandığında AL sinyali üretir.",
+            Category = "Özel",
+            ClassName = "CriptoMoney.Infrastructure.Indicators.CustomRuleIndicator",
+            DefaultWeight = 1.0m,
+            IsSystemDefault = false,
+            ParameterDefinitions =
+            [
+                new IndicatorParameterDefinition
+                {
+                    ParameterKey = "RuleJson",
+                    DisplayName = "Kural tanımı",
+                    DataType = "string",
+                    DefaultValue = "",
+                    SortOrder = 0,
+                },
+            ],
+        });
+
         await context.Indicators.AddRangeAsync(indicators);
         await context.SaveChangesAsync();
     }

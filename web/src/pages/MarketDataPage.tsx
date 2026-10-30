@@ -455,6 +455,11 @@ function ExportRow({ e, onDownload, onDelete }: {
 type FamilyInfo = { rule: string; scans: string; combos: string }
 
 const FAMILY_INFO: Record<string, FamilyInfo> = {
+  AUTO: {
+    rule: 'Hazır indikatör YOK. Sistem 14 ham ölçüden (RSI, ADX, yön, MACD, EMA uzaklıkları, hacim, oynaklık…) kendi kuralını kurar: "şu koşulların TAMAMI sağlanırsa pozisyonda kal".',
+    scans: 'binlerce aday kural — 1 ila 3 koşullu kombinasyonlar, eşikler verinin kendi dağılımından',
+    combos: 'veri ÜÇE bölünür: eğitim (arama) · doğrulama (seçim) · test (seçime hiç karışmaz)',
+  },
   T3: {
     rule: 'T3 (yumuşatılmış ortalama) üst üste N bar YUKARI dönünce AL, N bar AŞAĞI dönünce SAT.',
     scans: 'period (3–18), faktör (0.3–0.9), kaç bar onay isteneceği (1–3)',
@@ -569,8 +574,9 @@ function OptimizerTab() {
               <button key={f} onClick={() => setFamily(f)}
                 className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
                   family === f ? 'bg-yellow-400 text-black border-yellow-400'
-                               : 'bg-white/5 text-slate-300 border-white/10 hover:border-white/25')}>
-                {f}
+                               : 'bg-white/5 text-slate-300 border-white/10 hover:border-white/25',
+                  f === 'AUTO' && family !== f && 'border-violet-500/40 text-violet-300')}>
+                {f === 'AUTO' ? '✨ Kendi İndikatörümü Bul' : f}
               </button>
             ))}
           </div>
@@ -669,7 +675,8 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
   })
 
   const apply = useMutation({
-    mutationFn: (params?: Record<string, number>) => marketDataApi.applyIndicator(run.id, params),
+    mutationFn: (v: { params?: Record<string, number>; ruleJson?: string | null }) =>
+      marketDataApi.applyIndicator(run.id, v.params, v.ruleJson),
     onSuccess: r => {
       toast.success(r.message)
       qc.invalidateQueries({ queryKey: ['indicators'] })
@@ -727,8 +734,8 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
             {[
               ['Strateji', pct(run.bestReturnPct), 'text-slate-200'],
               ['Al-tut', pct(run.buyHoldReturnPct), 'text-slate-400'],
-              ['İlk dönem', pct(run.inSampleReturnPct), 'text-slate-300'],
-              ['İkinci dönem', pct(run.outOfSampleReturnPct),
+              [run.family === 'AUTO' ? 'Doğrulama' : 'İlk dönem', pct(run.inSampleReturnPct), 'text-slate-300'],
+              [run.family === 'AUTO' ? 'Test seti' : 'İkinci dönem', pct(run.outOfSampleReturnPct),
                 (run.outOfSampleReturnPct ?? 0) > 0 ? 'text-emerald-400' : 'text-red-400'],
               ['İşlem', run.bestTradeCount?.toString() ?? '—', 'text-slate-400'],
             ].map(([l, v, c]) => (
@@ -740,7 +747,12 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
           </div>
 
           {data?.results && data.results.length > 0 && (
-            <ResultsTable results={data.results} onApply={p => apply.mutate(p)} applying={apply.isPending} />
+            <ResultsTable
+              results={data.results}
+              onApply={(p, rule) => apply.mutate({ params: p, ruleJson: rule })}
+              applying={apply.isPending}
+              isAuto={run.family === 'AUTO'}
+            />
           )}
         </div>
       )}
@@ -748,22 +760,27 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
   )
 }
 
-function ResultsTable({ results, onApply, applying }: {
+function ResultsTable({ results, onApply, applying, isAuto }: {
   results: OptimizationCandidate[]
-  onApply: (params: Record<string, number>) => void
+  onApply: (params: Record<string, number>, ruleJson?: string | null) => void
   applying: boolean
+  isAuto: boolean
 }) {
   return (
     <div>
-      <p className="text-xs text-slate-400 mb-2">En iyi 10 kombinasyon (al-tut'a üstünlüğe göre)</p>
+      <p className="text-xs text-slate-400 mb-2">
+        {isAuto
+          ? 'Keşfedilen en iyi 10 kural (doğrulama setindeki üstünlüğe göre sıralı)'
+          : "En iyi 10 kombinasyon (al-tut'a üstünlüğe göre)"}
+      </p>
       <div className="overflow-x-auto border border-white/8 rounded-lg">
         <table className="w-full text-xs">
           <thead>
             <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-white/8">
-              <th className="text-left  font-medium px-2 py-2">Parametre</th>
+              <th className="text-left  font-medium px-2 py-2">{isAuto ? 'Keşfedilen kural' : 'Parametre'}</th>
               <th className="text-right font-medium px-2 py-2">Üstünlük</th>
               <th className="text-right font-medium px-2 py-2">Getiri</th>
-              <th className="text-right font-medium px-2 py-2">2. dönem</th>
+              <th className="text-right font-medium px-2 py-2">{isAuto ? 'Test seti' : '2. dönem'}</th>
               <th className="text-right font-medium px-2 py-2">Kazanma</th>
               <th className="text-right font-medium px-2 py-2">İşlem</th>
               <th className="text-right font-medium px-2 py-2">Coin</th>
@@ -773,7 +790,10 @@ function ResultsTable({ results, onApply, applying }: {
           <tbody>
             {results.slice(0, 10).map((r, i) => (
               <tr key={i} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]">
-                <td className="px-2 py-1.5 text-slate-300 whitespace-nowrap">{r.paramsLabel ?? '—'}</td>
+                <td className={cn('px-2 py-1.5 text-slate-300',
+                  isAuto ? 'min-w-[260px] leading-relaxed' : 'whitespace-nowrap')}>
+                  {r.paramsLabel ?? '—'}
+                </td>
                 <td className={cn('px-2 py-1.5 text-right tabular-nums font-semibold',
                   (r.edgePct ?? 0) > 0 ? 'text-emerald-400' : 'text-red-400')}>{pct(r.edgePct)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{pct(r.returnPct)}</td>
@@ -787,8 +807,8 @@ function ResultsTable({ results, onApply, applying }: {
                   {r.symbolsBeatingBuyHold ?? '—'}/{r.symbolCount ?? '—'}
                 </td>
                 <td className="px-2 py-1.5 text-right">
-                  <button onClick={() => r.parameters && onApply(r.parameters)}
-                    disabled={applying || !r.parameters}
+                  <button onClick={() => onApply(r.parameters ?? {}, r.ruleJson)}
+                    disabled={applying || (!r.ruleJson && !r.parameters)}
                     title="Bu parametreleri indikatör ayarı olarak kaydet"
                     className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-slate-300
                                hover:bg-yellow-400 hover:text-black hover:border-yellow-400

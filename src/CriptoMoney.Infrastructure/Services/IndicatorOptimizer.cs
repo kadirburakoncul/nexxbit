@@ -17,7 +17,11 @@ public record OptimizationCandidate(
     decimal InSamplePct,
     decimal OutOfSamplePct,
     int SymbolsBeatingBuyHold,
-    int SymbolCount);
+    int SymbolCount)
+{
+    /// <summary>Yalnızca AUTO ailesinde dolu — keşfedilen kuralın tanımı.</summary>
+    public string? RuleJson { get; init; }
+}
 
 public interface IIndicatorOptimizer
 {
@@ -42,9 +46,12 @@ public interface IIndicatorOptimizer
 ///   3) kaç coinde al-tut'u geçtiği sayılır.
 /// Sıralama ham getiriye göre değil, al-tut'a göre ÜSTÜNLÜK (edge) üzerinden yapılır.
 /// </summary>
-public class IndicatorOptimizer : IIndicatorOptimizer
+public class IndicatorOptimizer(IIndicatorDiscovery discovery) : IIndicatorOptimizer
 {
-    public IReadOnlyList<string> Families { get; } = ["T3", "EMA", "RSI", "MACD", "ADX"];
+    /// <summary>AUTO hazır bir aile değil — kuralı veriden türetir.</summary>
+    public const string AutoFamily = "AUTO";
+
+    public IReadOnlyList<string> Families { get; } = [AutoFamily, "T3", "EMA", "RSI", "MACD", "ADX"];
 
     public async Task<List<OptimizationCandidate>> RunAsync(
         IReadOnlyDictionary<string, List<CandleInput>> dataBySymbol,
@@ -53,6 +60,10 @@ public class IndicatorOptimizer : IIndicatorOptimizer
         IProgress<int>? progress = null,
         CancellationToken ct = default)
     {
+        // AUTO: parametre ızgarası yok, kural veriden keşfedilir.
+        if (family.Equals(AutoFamily, StringComparison.OrdinalIgnoreCase))
+            return await RunDiscoveryAsync(dataBySymbol, commissionPct, progress, ct);
+
         var grid = BuildGrid(family);
         var results = new List<OptimizationCandidate>(grid.Count);
 
@@ -102,6 +113,44 @@ public class IndicatorOptimizer : IIndicatorOptimizer
 
         // Ham getiri değil, al-tut'a üstünlük sıralanır.
         return [.. results.OrderByDescending(r => r.EdgePct)];
+    }
+
+
+    /// <summary>
+    /// Keşif sonuçlarını ortak sonuç biçimine çevirir.
+    /// InSample  → doğrulama seti (seçimin yapıldığı yer)
+    /// OutOfSample → test seti (seçime hiç karışmayan, dürüst tahmin)
+    /// </summary>
+    private async Task<List<OptimizationCandidate>> RunDiscoveryAsync(
+        IReadOnlyDictionary<string, List<CandleInput>> dataBySymbol,
+        decimal commissionPct,
+        IProgress<int>? progress,
+        CancellationToken ct)
+    {
+        var found = await discovery.DiscoverAsync(dataBySymbol, commissionPct, progress, ct);
+
+        return
+        [
+            .. found.Select(o => new OptimizationCandidate(
+                AutoFamily,
+                // Parametre sözlüğü yerine kuralın kendisi taşınır; "Uygula"
+                // bu JSON'u kullanıcının özel indikatörüne yazar.
+                new Dictionary<string, decimal>(),
+                o.RuleText,
+                o.TestPct + o.BuyHoldPct,   // stratejinin test setindeki getirisi
+                o.BuyHoldPct,
+                o.TestPct,                  // üstünlük = test setinde al-tut farkı
+                o.WinRate,
+                o.TradeCount,
+                0m,
+                o.ValidationPct,
+                o.TestPct,
+                o.SymbolsBeatingBuyHold,
+                o.SymbolCount)
+            {
+                RuleJson = o.Rule.ToJson(),
+            })
+        ];
     }
 
     // ─── Parametre ızgaraları ────────────────────────────────────────────────────
