@@ -1,3 +1,5 @@
+using CriptoMoney.Persistence.Context;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +7,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace CriptoMoney.Persistence.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260703100000_AddStrategyProtectionDefaults")]
     public partial class AddStrategyProtectionDefaults : Migration
     {
         /// <inheritdoc />

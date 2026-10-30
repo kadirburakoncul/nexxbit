@@ -1,4 +1,6 @@
 using System;
+using CriptoMoney.Persistence.Context;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,6 +8,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace CriptoMoney.Persistence.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260703120000_AddBistRsiPerStrategyAndWatchlist")]
     public partial class AddBistRsiPerStrategyAndWatchlist : Migration
     {
         /// <inheritdoc />

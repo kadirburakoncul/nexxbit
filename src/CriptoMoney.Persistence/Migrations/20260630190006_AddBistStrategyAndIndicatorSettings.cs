@@ -15,6 +15,16 @@ namespace CriptoMoney.Persistence.Migrations
                 name: "IX_BistStocks_IsInWatchlist",
                 table: "BistStocks");
 
+            // BistSignals.BistStockId üzerindeki foreign key'in bir indekse ihtiyacı var.
+            // Bu görevi şu an eski bileşik indeks (BistStockId, CandleTime) görüyor;
+            // önce yerine geçecek indeksi oluşturmadan onu düşürmek MySQL'de
+            // "Cannot drop index: needed in a foreign key constraint" hatası veriyordu.
+            // (Mevcut veritabanlarında fark edilmedi; yalnızca sıfırdan kurulumda patlıyordu.)
+            migrationBuilder.CreateIndex(
+                name: "IX_BistSignals_BistStockId",
+                table: "BistSignals",
+                column: "BistStockId");
+
             migrationBuilder.DropIndex(
                 name: "IX_BistSignals_BistStockId_CandleTime",
                 table: "BistSignals");
@@ -151,10 +161,7 @@ namespace CriptoMoney.Persistence.Migrations
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_BistSignals_BistStockId",
-                table: "BistSignals",
-                column: "BistStockId");
+            // IX_BistSignals_BistStockId yukarıda, eski indeks düşürülmeden önce oluşturuldu.
 
             migrationBuilder.CreateIndex(
                 name: "IX_BistSignals_BistStrategyId_BistStockId_CandleTime",
