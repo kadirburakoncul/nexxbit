@@ -296,6 +296,9 @@ public class FormulaDiscovery : IFormulaDiscovery
     private const int WarmupBars = 60;
     private const int MinTradesPerSymbol = 4;
 
+    /// <summary>Formülün geçerli olması gereken asgari sembol sayısı (%60).</summary>
+    private static int MinSymbolCoverage(int total) => Math.Max(1, (int)Math.Ceiling(total * 0.6));
+
     private static readonly int[] Periods = [3, 5, 10, 14, 20, 50];
     private static readonly double[] Quantiles = [0.2, 0.35, 0.5, 0.65, 0.8];
 
@@ -504,7 +507,10 @@ public class FormulaDiscovery : IFormulaDiscovery
             used++;
         }
 
-        if (used == 0 || trades < used * MinTradesPerSymbol) return double.MinValue;
+        // Formül sembollerin yalnızca birkaçında geçerliyse, o birkaç coine göre
+        // seçilmiş demektir — bu da bir tür aşırı uyumdur. Çoğunlukta çalışmalı.
+        if (used < MinSymbolCoverage(symbols.Count)) return double.MinValue;
+        if (trades < used * MinTradesPerSymbol) return double.MinValue;
 
         var edge = edgeSum / used;
 
@@ -540,7 +546,8 @@ public class FormulaDiscovery : IFormulaDiscovery
             used++;
         }
 
-        if (used == 0 || trades < used * MinTradesPerSymbol) return null;
+        if (used < MinSymbolCoverage(symbols.Count)) return null;
+        if (trades < used * MinTradesPerSymbol) return null;
 
         var formula = new DiscoveredFormula(
             ind.Tree.ToText(),
@@ -718,16 +725,28 @@ public class FormulaDiscovery : IFormulaDiscovery
             var idx = Math.Clamp((int)(sample.Count * ind.Quantile), 0, sample.Count - 1);
             var th = sample[idx];
 
-            // Neredeyse sabit formüller elenir. Örneğin uzun pencereli bir "en yüksek"
+            // Neredeyse sabit formüller elenmeli: uzun pencereli bir "en yüksek"
             // işlemi değeri doygunlaştırıp sabit hale getirebilir; böyle bir formül
-            // geçmişte iyi görünse bile sinyal üretmez, bilgi taşımaz.
-            // Ölçü: çeyrekler arası yayılım, büyüklüğüne göre anlamlı olmalı.
-            var q1 = sample[sample.Count / 4];
-            var q3 = sample[sample.Count * 3 / 4];
-            var spread = q3 - q1;
-            var magnitude = Math.Max(Math.Abs(th), 1e-6);
+            // geçmişte iyi görünse bile hiç sinyal üretmez.
+            //
+            // Önceki ölçü (yayılım / büyüklük oranı) kırılgandı: eşik sıfıra yakınsa
+            // oran patlıyor, büyükse sönüyordu — sağlam formüller sembollerin çoğunda
+            // reddediliyordu (8 coinin 1-3'ünde geçerli kalıyordu).
+            //
+            // Doğrudan önemli olanı ölçüyoruz: değer eşiği kaç kez KESİYOR.
+            // Ölçek bağımsızdır ve sinyal üretmeyen formülü kesin yakalar.
+            var crossings = 0;
+            var above = values[WarmupBars] > th;
+            for (var i = WarmupBars + 1; i < TrainEnd; i++)
+            {
+                var v = values[i];
+                if (double.IsNaN(v) || double.IsInfinity(v)) continue;
+                var nowAbove = v > th;
+                if (nowAbove != above) { crossings++; above = nowAbove; }
+            }
 
-            if (spread / magnitude < 0.002) return double.NaN;
+            // En az 6 kesişim ≈ 3 gidiş-dönüş. Altında kalan formül pratikte sabittir.
+            if (crossings < 6) return double.NaN;
 
             if (_thresholdCache.Count > 8000) _thresholdCache.Clear();
             _thresholdCache[key] = th;
