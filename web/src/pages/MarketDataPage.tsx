@@ -32,7 +32,13 @@ const fmtDuration = (s: number) =>
   s >= 60 ? `${Math.round(s / 60)} dakika` : `${s} saniye`
 
 const pct = (n: number | null | undefined) =>
-  n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
+  typeof n === 'number' && Number.isFinite(n)
+    ? `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
+    : '—'
+
+/** Eksik/bozuk alan tüm sayfayı çökertmesin diye sayısal okumalar korunur. */
+const num = (n: number | null | undefined, digits = 0) =>
+  typeof n === 'number' && Number.isFinite(n) ? n.toFixed(digits) : '—'
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10)
 
@@ -446,12 +452,34 @@ function ExportRow({ e, onDownload, onDelete }: {
 // Sekme 2 — İndikatör arama
 // ═══════════════════════════════════════════════════════════════════════════
 
-const FAMILY_INFO: Record<string, string> = {
-  T3:   'Tillson T3 yumuşatılmış ortalama — period, faktör ve kaç bar onay isteneceği taranır.',
-  EMA:  'Hızlı/yavaş EMA kesişimi — klasik trend takibi.',
-  RSI:  'RSI eşik geçişleri — periyot ve al/sat seviyeleri taranır.',
-  MACD: 'MACD histogram sıfır geçişleri — hızlı/yavaş/sinyal kombinasyonları.',
-  ADX:  'ADX trend gücü + yön (+DI/−DI) — periyot ve eşik taranır.',
+type FamilyInfo = { rule: string; scans: string; combos: string }
+
+const FAMILY_INFO: Record<string, FamilyInfo> = {
+  T3: {
+    rule: 'T3 (yumuşatılmış ortalama) üst üste N bar YUKARI dönünce AL, N bar AŞAĞI dönünce SAT.',
+    scans: 'period (3–18), faktör (0.3–0.9), kaç bar onay isteneceği (1–3)',
+    combos: '72 kombinasyon',
+  },
+  EMA: {
+    rule: 'Hızlı EMA, yavaş EMA'yı YUKARI keserse AL; aşağı keserse SAT. Klasik trend takibi.',
+    scans: 'hızlı periyot (5–26), yavaş periyot (21–200)',
+    combos: '19 kombinasyon',
+  },
+  RSI: {
+    rule: 'RSI al seviyesini YUKARI geçerse AL; sat seviyesini AŞAĞI geçerse SAT.',
+    scans: 'periyot (7/14/21), al seviyesi (30–55), sat seviyesi (60–80)',
+    combos: '48 kombinasyon',
+  },
+  MACD: {
+    rule: 'MACD histogramı sıfırın ÜSTÜNE çıkınca AL, ALTINA inince SAT.',
+    scans: 'hızlı (8–16), yavaş (21–34), sinyal (7–12)',
+    combos: '21 kombinasyon',
+  },
+  ADX: {
+    rule: 'ADX eşiğin üstünde VE +DI > −DI ise AL (güçlü yukarı trend); değilse SAT.',
+    scans: 'periyot (10/14/20), trend gücü eşiği (15–30)',
+    combos: '12 kombinasyon',
+  },
 }
 
 function OptimizerTab() {
@@ -530,7 +558,12 @@ function OptimizerTab() {
         <p className="text-sm font-semibold text-slate-200">2 · Arama ayarları</p>
 
         <div>
-          <label className="text-xs text-slate-400 block mb-2">İndikatör ailesi</label>
+          <label className="text-xs text-slate-400 block mb-1">İndikatör ailesi</label>
+          <p className="text-[11px] text-slate-600 mb-2 leading-relaxed">
+            Hangi <span className="text-slate-400">al-sat kuralının</span> taranacağını seçer.
+            Her aile farklı bir mantıkla alım/satım kararı verir; bu araç o kuralın
+            <span className="text-slate-400"> en iyi ayarlarını</span> arar — kuralın kendisini değiştirmez.
+          </p>
           <div className="flex flex-wrap gap-2">
             {families.map(f => (
               <button key={f} onClick={() => setFamily(f)}
@@ -541,7 +574,26 @@ function OptimizerTab() {
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-slate-600 mt-1.5">{FAMILY_INFO[family]}</p>
+
+          {FAMILY_INFO[family] && (
+            <div className="mt-2.5 bg-white/[0.03] border border-white/8 rounded-lg p-3 space-y-1.5">
+              <div className="flex gap-2">
+                <span className="text-[11px] text-slate-500 w-20 shrink-0">Kural</span>
+                <span className="text-[11px] text-slate-300 flex-1">{FAMILY_INFO[family].rule}</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-[11px] text-slate-500 w-20 shrink-0">Taranan</span>
+                <span className="text-[11px] text-slate-400 flex-1">{FAMILY_INFO[family].scans}</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-[11px] text-slate-500 w-20 shrink-0">Deneme</span>
+                <span className="text-[11px] text-slate-400 flex-1">
+                  {FAMILY_INFO[family].combos}
+                  <span className="text-slate-600"> — her biri seçtiğiniz tüm coinlerde ayrı test edilir</span>
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
@@ -721,21 +773,22 @@ function ResultsTable({ results, onApply, applying }: {
           <tbody>
             {results.slice(0, 10).map((r, i) => (
               <tr key={i} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]">
-                <td className="px-2 py-1.5 text-slate-300 whitespace-nowrap">{r.paramsLabel}</td>
+                <td className="px-2 py-1.5 text-slate-300 whitespace-nowrap">{r.paramsLabel ?? '—'}</td>
                 <td className={cn('px-2 py-1.5 text-right tabular-nums font-semibold',
-                  r.edgePct > 0 ? 'text-emerald-400' : 'text-red-400')}>{pct(r.edgePct)}</td>
+                  (r.edgePct ?? 0) > 0 ? 'text-emerald-400' : 'text-red-400')}>{pct(r.edgePct)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{pct(r.returnPct)}</td>
                 <td className={cn('px-2 py-1.5 text-right tabular-nums',
-                  r.outOfSamplePct > 0 ? 'text-emerald-400/80' : 'text-red-400/80')}>
+                  (r.outOfSamplePct ?? 0) > 0 ? 'text-emerald-400/80' : 'text-red-400/80')}>
                   {pct(r.outOfSamplePct)}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{r.winRate.toFixed(0)}%</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{r.tradeCount}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{num(r.winRate)}%</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{r.tradeCount ?? '—'}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
-                  {r.symbolsBeatingBuyHold}/{r.symbolCount}
+                  {r.symbolsBeatingBuyHold ?? '—'}/{r.symbolCount ?? '—'}
                 </td>
                 <td className="px-2 py-1.5 text-right">
-                  <button onClick={() => onApply(r.parameters)} disabled={applying}
+                  <button onClick={() => r.parameters && onApply(r.parameters)}
+                    disabled={applying || !r.parameters}
                     title="Bu parametreleri indikatör ayarı olarak kaydet"
                     className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-slate-300
                                hover:bg-yellow-400 hover:text-black hover:border-yellow-400

@@ -160,9 +160,12 @@ public class MarketDataController(
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == CurrentUserId, ct);
         if (run is null) return NotFound();
 
-        var results = string.IsNullOrEmpty(run.ResultsJson)
-            ? []
-            : JsonSerializer.Deserialize<List<JsonElement>>(run.ResultsJson) ?? [];
+        // Kayıtlı JSON'u ham geçirmek yerine tipli olarak okuyoruz.
+        // Eski kayıtlar PascalCase ("ParamsLabel") yazılmıştı, yenileri camelCase;
+        // ham geçirildiğinde frontend alanı bulamayıp sayfayı çökertiyordu.
+        // Büyük/küçük harf duyarsız okuyup yeniden serileştirince her iki
+        // nesil kayıt da aynı biçimde dönüyor — veri taşımaya gerek kalmıyor.
+        var results = ReadResults(run.ResultsJson);
 
         return Ok(new { detail = ToOptimizationDto(run), results });
     }
@@ -336,6 +339,28 @@ public class MarketDataController(
         return Ok(new { indicator = indicatorName, applied, skipped, message });
     }
 
+    /// <summary>
+    /// Kayıtlı sonuç listesini biçimden bağımsız okur. Bozuk/eski bir kayıt
+    /// tüm sayfayı çökertmemeli — çözümlenemezse boş liste döner.
+    /// </summary>
+    private static List<OptimizationResultDto> ReadResults(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<OptimizationResultDto>>(json, CaseInsensitive) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static readonly JsonSerializerOptions CaseInsensitive = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     // ─── DTO dönüşümleri ─────────────────────────────────────────────────────────
 
     private static MarketDataExportDto ToExportDto(MarketDataExport e) => new(
@@ -392,3 +417,19 @@ public record IndicatorOptimizationDto(
     string? Verdict, string? ErrorMessage, DateTime CreatedAt, DateTime? CompletedAt);
 
 public record ApplyIndicatorRequest(Dictionary<string, decimal>? Parameters);
+
+/// <summary>Optimizasyon sonucunun API'ye dönen biçimi (kayıtlı JSON buna okunur).</summary>
+public record OptimizationResultDto(
+    string Family,
+    Dictionary<string, decimal> Parameters,
+    string ParamsLabel,
+    decimal ReturnPct,
+    decimal BuyHoldPct,
+    decimal EdgePct,
+    decimal WinRate,
+    int TradeCount,
+    decimal MaxDrawdownPct,
+    decimal InSamplePct,
+    decimal OutOfSamplePct,
+    int SymbolsBeatingBuyHold,
+    int SymbolCount);
