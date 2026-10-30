@@ -150,7 +150,9 @@ public class IndicatorOptimizationJob(
 
         var parts = new List<string>();
 
-        var isAuto = b.Family.Equals("AUTO", StringComparison.OrdinalIgnoreCase);
+        var isAuto = b.Family.Equals("AUTO", StringComparison.OrdinalIgnoreCase)
+                  || b.Family.Equals("KURAL", StringComparison.OrdinalIgnoreCase);
+        var isFormula = b.Family.Equals("AUTO", StringComparison.OrdinalIgnoreCase);
         var firstLabel  = isAuto ? "doğrulama seti" : "ilk dönem";
         var secondLabel = isAuto ? "test seti" : "ikinci dönem";
 
@@ -179,7 +181,13 @@ public class IndicatorOptimizationJob(
                     + $"{b.SymbolCount} coinin {b.SymbolsBeatingBuyHold} tanesinde üstün).");
         }
 
-        parts.Add(isAuto
+        parts.Add(isFormula
+            ? $"{combinationCount} formül evrimleşti — hiçbir hazır indikatör kullanılmadı, "
+              + "formüller ham mum verisinden kuruldu. Veri üçe bölündü: evrim eğitim setinde "
+              + "yapıldı, en iyiler doğrulama setinde seçildi, test seti evrime hiç girmedi. "
+              + "Raporlanan test sonucu bu yüzden daha güvenilirdir — ancak formül evrimi aşırı "
+              + "uyuma EN YATKIN yöntemdir, gerçek parayla kullanmadan önce farklı bir dönemde tekrar ölçün."
+            : isAuto
             ? $"{combinationCount} aday kural üretildi — veri üçe bölündü: kurallar eğitim setinde arandı, "
               + "en iyiler doğrulama setinde seçildi, test seti seçime hiç karışmadı. "
               + "Raporlanan test sonucu bu yüzden daha güvenilirdir ama yine de garanti değildir."

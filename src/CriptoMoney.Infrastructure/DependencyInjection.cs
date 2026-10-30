@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
         services.AddScoped<IMarketDataService, MarketDataService>();
         services.AddSingleton<IIndicatorDiscovery, IndicatorDiscovery>();
+        services.AddSingleton<IFormulaDiscovery, FormulaDiscovery>();
         services.AddSingleton<IIndicatorOptimizer, IndicatorOptimizer>();
         services.AddSingleton<IEncryptionService, EncryptionService>();
         services.AddScoped<IBinanceService, BinanceService>();

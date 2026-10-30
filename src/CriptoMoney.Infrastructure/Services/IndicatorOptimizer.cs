@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CriptoMoney.Application.Common.Interfaces;
 using CriptoMoney.Infrastructure.Indicators;
 
@@ -46,12 +47,18 @@ public interface IIndicatorOptimizer
 ///   3) kaç coinde al-tut'u geçtiği sayılır.
 /// Sıralama ham getiriye göre değil, al-tut'a göre ÜSTÜNLÜK (edge) üzerinden yapılır.
 /// </summary>
-public class IndicatorOptimizer(IIndicatorDiscovery discovery) : IIndicatorOptimizer
+public class IndicatorOptimizer(
+    IIndicatorDiscovery discovery,
+    IFormulaDiscovery formulaDiscovery) : IIndicatorOptimizer
 {
-    /// <summary>AUTO hazır bir aile değil — kuralı veriden türetir.</summary>
+    /// <summary>Ham OHLCV'den formül evrimleştirir — hiçbir hazır indikatör kullanmaz.</summary>
     public const string AutoFamily = "AUTO";
 
-    public IReadOnlyList<string> Families { get; } = [AutoFamily, "T3", "EMA", "RSI", "MACD", "ADX"];
+    /// <summary>Hazır indikatörleri yapı taşı olarak kullanıp koşul kombinasyonu arar.</summary>
+    public const string RuleFamily = "KURAL";
+
+    public IReadOnlyList<string> Families { get; } =
+        [AutoFamily, RuleFamily, "T3", "EMA", "RSI", "MACD", "ADX"];
 
     public async Task<List<OptimizationCandidate>> RunAsync(
         IReadOnlyDictionary<string, List<CandleInput>> dataBySymbol,
@@ -60,8 +67,12 @@ public class IndicatorOptimizer(IIndicatorDiscovery discovery) : IIndicatorOptim
         IProgress<int>? progress = null,
         CancellationToken ct = default)
     {
-        // AUTO: parametre ızgarası yok, kural veriden keşfedilir.
+        // AUTO: hazır indikatör yok — formül ham veriden evrimleştirilir.
         if (family.Equals(AutoFamily, StringComparison.OrdinalIgnoreCase))
+            return await RunFormulaEvolutionAsync(dataBySymbol, commissionPct, progress, ct);
+
+        // KURAL: hazır indikatörler yapı taşı, koşul kombinasyonu aranır.
+        if (family.Equals(RuleFamily, StringComparison.OrdinalIgnoreCase))
             return await RunDiscoveryAsync(dataBySymbol, commissionPct, progress, ct);
 
         var grid = BuildGrid(family);
@@ -115,6 +126,49 @@ public class IndicatorOptimizer(IIndicatorDiscovery discovery) : IIndicatorOptim
         return [.. results.OrderByDescending(r => r.EdgePct)];
     }
 
+
+
+    /// <summary>
+    /// Evrimleşen formülleri ortak sonuç biçimine çevirir.
+    /// InSample   → doğrulama seti (seçimin yapıldığı yer)
+    /// OutOfSample → test seti (evrime hiç girmeyen, dürüst tahmin)
+    /// </summary>
+    private async Task<List<OptimizationCandidate>> RunFormulaEvolutionAsync(
+        IReadOnlyDictionary<string, List<CandleInput>> dataBySymbol,
+        decimal commissionPct,
+        IProgress<int>? progress,
+        CancellationToken ct)
+    {
+        var found = await formulaDiscovery.EvolveAsync(dataBySymbol, commissionPct, progress, ct);
+
+        return
+        [
+            .. found.Select(o => new OptimizationCandidate(
+                AutoFamily,
+                new Dictionary<string, decimal> { ["karmasiklik"] = o.Complexity },
+                o.Formula.Describe(),
+                o.TestPct + o.BuyHoldPct,
+                o.BuyHoldPct,
+                o.TestPct,
+                o.WinRate,
+                o.TradeCount,
+                0m,
+                o.ValidationPct,
+                o.TestPct,
+                o.SymbolsBeatingBuyHold,
+                o.SymbolCount)
+            {
+                RuleJson = JsonSerializer.Serialize(new
+                {
+                    kind = "formula",
+                    expression = o.Formula.Expression,
+                    tree = o.Formula.ExpressionJson,
+                    quantile = o.Formula.ThresholdQuantile,
+                    greaterThan = o.Formula.GreaterThan,
+                }),
+            })
+        ];
+    }
 
     /// <summary>
     /// Keşif sonuçlarını ortak sonuç biçimine çevirir.

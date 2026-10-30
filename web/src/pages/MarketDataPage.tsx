@@ -456,7 +456,12 @@ type FamilyInfo = { rule: string; scans: string; combos: string }
 
 const FAMILY_INFO: Record<string, FamilyInfo> = {
   AUTO: {
-    rule: 'Hazır indikatör YOK. Sistem 14 ham ölçüden (RSI, ADX, yön, MACD, EMA uzaklıkları, hacim, oynaklık…) kendi kuralını kurar: "şu koşulların TAMAMI sağlanırsa pozisyonda kal".',
+    rule: 'Hiçbir hazır indikatör KULLANILMAZ. Elde yalnızca ham mum alanları (açılış/yüksek/düşük/kapanış/hacim) ve genel işlemler (ortalama, en yüksek, en düşük, sapma, gecikme, değişim, dört işlem) vardır. Sistem bunları birleştirerek kendi formülünü kurar.',
+    scans: 'formül ağaçları evrimleşir — 180 birey × 18 nesil, çaprazlama ve mutasyonla. Eşik, formülün kendi dağılımındaki yüzdelik.',
+    combos: 'veri ÜÇE bölünür: eğitim (evrim) · doğrulama (seçim) · test (evrime hiç girmez)',
+  },
+  KURAL: {
+    rule: 'Hazır indikatörleri YAPI TAŞI olarak kullanır: RSI, ADX, yön, MACD, EMA uzaklıkları, hacim, oynaklık… Bunlardan "şu koşulların TAMAMI sağlanırsa pozisyonda kal" biçiminde kural kurar.',
     scans: 'binlerce aday kural — 1 ila 3 koşullu kombinasyonlar, eşikler verinin kendi dağılımından',
     combos: 'veri ÜÇE bölünür: eğitim (arama) · doğrulama (seçim) · test (seçime hiç karışmaz)',
   },
@@ -575,8 +580,11 @@ function OptimizerTab() {
                 className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
                   family === f ? 'bg-yellow-400 text-black border-yellow-400'
                                : 'bg-white/5 text-slate-300 border-white/10 hover:border-white/25',
-                  f === 'AUTO' && family !== f && 'border-violet-500/40 text-violet-300')}>
-                {f === 'AUTO' ? '✨ Kendi İndikatörümü Bul' : f}
+                  f === 'AUTO' && family !== f && 'border-violet-500/40 text-violet-300',
+                  f === 'KURAL' && family !== f && 'border-sky-500/40 text-sky-300')}>
+                {f === 'AUTO' ? '✨ Sıfırdan Formül Üret'
+                  : f === 'KURAL' ? '🧩 İndikatörlerden Kural Kur'
+                  : f}
               </button>
             ))}
           </div>
@@ -684,6 +692,7 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
     onError: (e: any) => toast.error(e?.response?.data?.errors?.[0] ?? 'Uygulanamadı.'),
   })
 
+  const isDiscovery = run.family === 'AUTO' || run.family === 'KURAL'
   const edge = run.bestReturnPct != null && run.buyHoldReturnPct != null
     ? run.bestReturnPct - run.buyHoldReturnPct : null
 
@@ -734,8 +743,8 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
             {[
               ['Strateji', pct(run.bestReturnPct), 'text-slate-200'],
               ['Al-tut', pct(run.buyHoldReturnPct), 'text-slate-400'],
-              [run.family === 'AUTO' ? 'Doğrulama' : 'İlk dönem', pct(run.inSampleReturnPct), 'text-slate-300'],
-              [run.family === 'AUTO' ? 'Test seti' : 'İkinci dönem', pct(run.outOfSampleReturnPct),
+              [isDiscovery ? 'Doğrulama' : 'İlk dönem', pct(run.inSampleReturnPct), 'text-slate-300'],
+              [isDiscovery ? 'Test seti' : 'İkinci dönem', pct(run.outOfSampleReturnPct),
                 (run.outOfSampleReturnPct ?? 0) > 0 ? 'text-emerald-400' : 'text-red-400'],
               ['İşlem', run.bestTradeCount?.toString() ?? '—', 'text-slate-400'],
             ].map(([l, v, c]) => (
@@ -752,6 +761,7 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
               onApply={(p, rule) => apply.mutate({ params: p, ruleJson: rule })}
               applying={apply.isPending}
               isAuto={run.family === 'AUTO'}
+              isRule={run.family === 'KURAL'}
             />
           )}
         </div>
@@ -760,27 +770,30 @@ function OptimizationRow({ run, open, onToggle, onDelete }: {
   )
 }
 
-function ResultsTable({ results, onApply, applying, isAuto }: {
+function ResultsTable({ results, onApply, applying, isAuto, isRule }: {
   results: OptimizationCandidate[]
   onApply: (params: Record<string, number>, ruleJson?: string | null) => void
   applying: boolean
   isAuto: boolean
+  isRule: boolean
 }) {
   return (
     <div>
       <p className="text-xs text-slate-400 mb-2">
-        {isAuto
-          ? 'Keşfedilen en iyi 10 kural (doğrulama setindeki üstünlüğe göre sıralı)'
+        {isAuto || isRule
+          ? 'Keşfedilen en iyi 10 formül (doğrulama setindeki üstünlüğe göre sıralı)'
           : "En iyi 10 kombinasyon (al-tut'a üstünlüğe göre)"}
       </p>
       <div className="overflow-x-auto border border-white/8 rounded-lg">
         <table className="w-full text-xs">
           <thead>
             <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-white/8">
-              <th className="text-left  font-medium px-2 py-2">{isAuto ? 'Keşfedilen kural' : 'Parametre'}</th>
+              <th className="text-left  font-medium px-2 py-2">
+                {isAuto ? 'Keşfedilen formül' : isRule ? 'Keşfedilen kural' : 'Parametre'}
+              </th>
               <th className="text-right font-medium px-2 py-2">Üstünlük</th>
               <th className="text-right font-medium px-2 py-2">Getiri</th>
-              <th className="text-right font-medium px-2 py-2">{isAuto ? 'Test seti' : '2. dönem'}</th>
+              <th className="text-right font-medium px-2 py-2">{isAuto || isRule ? 'Test seti' : '2. dönem'}</th>
               <th className="text-right font-medium px-2 py-2">Kazanma</th>
               <th className="text-right font-medium px-2 py-2">İşlem</th>
               <th className="text-right font-medium px-2 py-2">Coin</th>
@@ -791,7 +804,7 @@ function ResultsTable({ results, onApply, applying, isAuto }: {
             {results.slice(0, 10).map((r, i) => (
               <tr key={i} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]">
                 <td className={cn('px-2 py-1.5 text-slate-300',
-                  isAuto ? 'min-w-[260px] leading-relaxed' : 'whitespace-nowrap')}>
+                  isAuto || isRule ? 'min-w-[280px] leading-relaxed' : 'whitespace-nowrap')}>
                   {r.paramsLabel ?? '—'}
                 </td>
                 <td className={cn('px-2 py-1.5 text-right tabular-nums font-semibold',

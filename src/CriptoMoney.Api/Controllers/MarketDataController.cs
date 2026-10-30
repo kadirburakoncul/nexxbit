@@ -234,7 +234,8 @@ public class MarketDataController(
 
         // AUTO ailesinde taşınan şey parametre değil, kuralın kendisi.
         // Kural, CustomRule indikatörünün RuleJson parametresine yazılır.
-        if (run.IndicatorFamily.Equals("AUTO", StringComparison.OrdinalIgnoreCase))
+        if (run.IndicatorFamily.Equals("AUTO", StringComparison.OrdinalIgnoreCase)
+            || run.IndicatorFamily.Equals("KURAL", StringComparison.OrdinalIgnoreCase))
             return await ApplyDiscoveredRuleAsync(run, req.RuleJson, ct);
 
         var paramsToApply = req.Parameters is { Count: > 0 }
@@ -403,10 +404,7 @@ public class MarketDataController(
         setting.IsEnabled = true;
         await db.SaveChangesAsync(ct);
 
-        var rule = Infrastructure.Services.DiscoveredRule.FromJson(ruleJson);
-        var text = rule is null
-            ? "(kural çözümlenemedi)"
-            : string.Join(" VE ", rule.Conditions.Select(Infrastructure.Services.FeatureSet.Describe));
+        var text = DescribeSavedDefinition(ruleJson);
 
         return Ok(new
         {
@@ -417,6 +415,28 @@ public class MarketDataController(
                     + "İndikatörler sayfasında \"Kendi İndikatörüm\" olarak görünür; "
                     + "Analiz ve Backtest'te kullanabilirsiniz."
         });
+    }
+
+    /// <summary>Kaydedilen tanımı okunabilir metne çevirir (formül ya da koşul listesi).</summary>
+    private static string DescribeSavedDefinition(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("kind", out var kind) && kind.GetString() == "formula")
+            {
+                var expr = doc.RootElement.GetProperty("expression").GetString() ?? "formül";
+                var q = doc.RootElement.GetProperty("quantile").GetDouble();
+                var gt = doc.RootElement.GetProperty("greaterThan").GetBoolean();
+                return $"{expr} {(gt ? ">" : "<")} kendi {q * 100:0}. yüzdeliği";
+            }
+        }
+        catch (JsonException) { /* koşul listesi olabilir */ }
+
+        var rule = Infrastructure.Services.DiscoveredRule.FromJson(json);
+        return rule is null
+            ? "(tanım çözümlenemedi)"
+            : string.Join(" VE ", rule.Conditions.Select(Infrastructure.Services.FeatureSet.Describe));
     }
 
     /// <summary>
