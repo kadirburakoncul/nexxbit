@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, TrendingUp, LineChart, Bell, Settings,
   Wifi, FlaskConical, Shield, Users, CandlestickChart, Terminal,
-  BarChart3, Cpu, Sliders, ClipboardList, Radar, Flame, BarChart2, PieChart, Trophy
+  BarChart3, Cpu, Sliders, ClipboardList, Radar, Flame, BarChart2, PieChart, Trophy, Database
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -33,6 +33,7 @@ const navItems = [
   { to: '/volatile',   icon: Flame,           label: 'Volatil Mod' },
   { to: '/analysis',   icon: BarChart2,       label: 'Analiz'      },
   { to: '/analytics',  icon: PieChart,        label: 'Performans'  },
+  { to: '/market-data',icon: Database,        label: 'Veri & Lab'  },
   { to: '/notifications', icon: Bell,         label: 'Bildirimler' },
   { to: '/settings',   icon: Settings,        label: 'Ayarlar'     },
   { to: '/binance',    icon: Wifi,            label: 'Binance'     },

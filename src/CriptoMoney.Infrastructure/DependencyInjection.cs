@@ -18,6 +18,8 @@ public static class DependencyInjection
         services.AddSingleton<ITelegramService, TelegramService>();
         services.AddHttpClient("telegram").ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler());
         services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
+        services.AddScoped<IMarketDataService, MarketDataService>();
+        services.AddSingleton<IIndicatorOptimizer, IndicatorOptimizer>();
         services.AddSingleton<IEncryptionService, EncryptionService>();
         services.AddScoped<IBinanceService, BinanceService>();
         services.AddScoped<IEmailService, SmtpEmailService>();

@@ -1,0 +1,381 @@
+using System.Security.Claims;
+using System.Text.Json;
+using CriptoMoney.Application.Common.Interfaces;
+
+using CriptoMoney.Domain.Entities;
+using CriptoMoney.Domain.Enums;
+using CriptoMoney.Infrastructure.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace CriptoMoney.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class MarketDataController(
+    IApplicationDbContext db,
+    IMarketDataService marketData,
+    IIndicatorOptimizer optimizer,
+    IMarketDataJobScheduler scheduler) : ControllerBase
+{
+    private Guid CurrentUserId => Guid.Parse(
+        User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+
+    // ─── Sembol listesi ──────────────────────────────────────────────────────────
+
+    /// <summary>Tüm USDT pariteleri, 24 saatlik hacme göre azalan sırada.</summary>
+    [HttpGet("symbols")]
+    public async Task<IActionResult> GetSymbols(CancellationToken ct)
+    {
+        var result = await marketData.GetSymbolsByVolumeAsync(ct);
+        if (!result.Succeeded) return BadRequest(new { errors = result.Errors });
+
+        return Ok(result.Data!.Select(s => new MarketSymbolDto(
+            s.Symbol, s.BaseAsset, s.LastPrice, s.PriceChangePercent, s.QuoteVolume24h, s.TradeCount24h)));
+    }
+
+    /// <summary>Desteklenen periyotlar. 45m Binance'te yoktur, 15m'den türetilir.</summary>
+    [HttpGet("timeframes")]
+    public IActionResult GetTimeframes() =>
+        Ok(TimeframeHelper.All.Select(t => new TimeframeDto(
+            t.Key, t.DisplayName, t.AggregateCount > 1,
+            t.AggregateCount > 1 ? $"{t.SourceInterval} barlardan türetilir" : "Binance'ten doğrudan")));
+
+    /// <summary>İndirme başlamadan önce boyut/süre tahmini.</summary>
+    [HttpPost("estimate")]
+    public IActionResult Estimate([FromBody] EstimateRequest req)
+    {
+        var est = marketData.Estimate(req.SymbolCount, req.Timeframe, req.StartDate, req.EndDate);
+        return Ok(est);
+    }
+
+    // ─── Dışa aktarma ────────────────────────────────────────────────────────────
+
+    [HttpGet("exports")]
+    public async Task<IActionResult> GetExports(CancellationToken ct)
+    {
+        var list = await db.MarketDataExports
+            .Where(e => e.UserId == CurrentUserId)
+            .OrderByDescending(e => e.CreatedAt)
+            .Take(50)
+            .ToListAsync(ct);
+
+        return Ok(list.Select(ToExportDto));
+    }
+
+    [HttpPost("exports")]
+    public async Task<IActionResult> CreateExport([FromBody] CreateExportRequest req, CancellationToken ct)
+    {
+        if (req.Symbols.Count == 0)
+            return BadRequest(new { errors = new[] { "En az 1 coin seçin." } });
+
+        if (!TimeframeHelper.IsSupported(req.Timeframe))
+            return BadRequest(new { errors = new[] { $"Desteklenmeyen periyot: {req.Timeframe}" } });
+
+        if (req.EndDate <= req.StartDate)
+            return BadRequest(new { errors = new[] { "Bitiş tarihi başlangıçtan sonra olmalı." } });
+
+        var est = marketData.Estimate(req.Symbols.Count, req.Timeframe, req.StartDate, req.EndDate);
+        if (est.ExceedsLimits)
+            return BadRequest(new { errors = new[] { est.Warning ?? "İstek sınırları aşıyor." } });
+
+        var export = new MarketDataExport
+        {
+            UserId = CurrentUserId,
+            Name = string.IsNullOrWhiteSpace(req.Name) ? $"Veri {DateTime.UtcNow:yyyyMMdd-HHmm}" : req.Name.Trim(),
+            Symbols = JsonSerializer.Serialize(req.Symbols),
+            SymbolCount = req.Symbols.Count,
+            Timeframe = req.Timeframe,
+            StartDate = DateTime.SpecifyKind(req.StartDate, DateTimeKind.Utc),
+            EndDate = DateTime.SpecifyKind(req.EndDate, DateTimeKind.Utc),
+            Format = req.Format == "json" ? "json" : "csv",
+            IncludeIndicators = req.IncludeIndicators,
+            Status = MarketDataExportStatus.Pending,
+        };
+
+        db.MarketDataExports.Add(export);
+        await db.SaveChangesAsync(ct);
+
+        scheduler.EnqueueExport(export.Id);
+        return Ok(ToExportDto(export));
+    }
+
+    [HttpGet("exports/{id:guid}/download")]
+    public async Task<IActionResult> DownloadExport(Guid id, CancellationToken ct)
+    {
+        var export = await db.MarketDataExports
+            .FirstOrDefaultAsync(e => e.Id == id && e.UserId == CurrentUserId, ct);
+
+        if (export is null) return NotFound();
+        if (export.Status != MarketDataExportStatus.Completed || export.FilePath is null)
+            return BadRequest(new { errors = new[] { "Dosya henüz hazır değil." } });
+        if (!System.IO.File.Exists(export.FilePath))
+            return NotFound(new { errors = new[] { "Dosya diskte bulunamadı — yeniden oluşturun." } });
+
+        var contentType = export.Format == "json" ? "application/json" : "text/csv";
+        var stream = new FileStream(export.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return File(stream, contentType, Path.GetFileName(export.FilePath));
+    }
+
+    [HttpDelete("exports/{id:guid}")]
+    public async Task<IActionResult> DeleteExport(Guid id, CancellationToken ct)
+    {
+        var export = await db.MarketDataExports
+            .FirstOrDefaultAsync(e => e.Id == id && e.UserId == CurrentUserId, ct);
+        if (export is null) return NotFound();
+
+        if (export.FilePath is not null && System.IO.File.Exists(export.FilePath))
+        {
+            try { System.IO.File.Delete(export.FilePath); } catch { /* dosya kilitli olabilir */ }
+        }
+
+        db.MarketDataExports.Remove(export);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    // ─── İndikatör optimizasyonu ─────────────────────────────────────────────────
+
+    [HttpGet("optimizer/families")]
+    public IActionResult GetFamilies() => Ok(optimizer.Families);
+
+    [HttpGet("optimizations")]
+    public async Task<IActionResult> GetOptimizations(CancellationToken ct)
+    {
+        var list = await db.IndicatorOptimizations
+            .Where(o => o.UserId == CurrentUserId)
+            .OrderByDescending(o => o.CreatedAt)
+            .Take(50)
+            .ToListAsync(ct);
+
+        return Ok(list.Select(ToOptimizationDto));
+    }
+
+    [HttpGet("optimizations/{id:guid}")]
+    public async Task<IActionResult> GetOptimization(Guid id, CancellationToken ct)
+    {
+        var run = await db.IndicatorOptimizations
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == CurrentUserId, ct);
+        if (run is null) return NotFound();
+
+        var results = string.IsNullOrEmpty(run.ResultsJson)
+            ? []
+            : JsonSerializer.Deserialize<List<JsonElement>>(run.ResultsJson) ?? [];
+
+        return Ok(new { detail = ToOptimizationDto(run), results });
+    }
+
+    [HttpPost("optimizations")]
+    public async Task<IActionResult> CreateOptimization([FromBody] CreateOptimizationRequest req, CancellationToken ct)
+    {
+        if (req.Symbols.Count == 0)
+            return BadRequest(new { errors = new[] { "En az 1 coin seçin." } });
+
+        if (req.Symbols.Count > 30)
+            return BadRequest(new { errors = new[] { "Optimizasyon için en fazla 30 coin seçin — her coin tüm kombinasyonlarda yeniden test edilir." } });
+
+        if (!TimeframeHelper.IsSupported(req.Timeframe))
+            return BadRequest(new { errors = new[] { $"Desteklenmeyen periyot: {req.Timeframe}" } });
+
+        if (!optimizer.Families.Contains(req.Family, StringComparer.OrdinalIgnoreCase))
+            return BadRequest(new { errors = new[] { $"Bilinmeyen indikatör ailesi: {req.Family}" } });
+
+        var run = new IndicatorOptimization
+        {
+            UserId = CurrentUserId,
+            Name = string.IsNullOrWhiteSpace(req.Name) ? $"{req.Family} taraması {DateTime.UtcNow:yyyyMMdd-HHmm}" : req.Name.Trim(),
+            Symbols = JsonSerializer.Serialize(req.Symbols),
+            Timeframe = req.Timeframe,
+            StartDate = DateTime.SpecifyKind(req.StartDate, DateTimeKind.Utc),
+            EndDate = DateTime.SpecifyKind(req.EndDate, DateTimeKind.Utc),
+            IndicatorFamily = req.Family.ToUpperInvariant(),
+            CommissionPct = Math.Clamp(req.CommissionPct, 0m, 5m),
+            MarketDataExportId = req.MarketDataExportId,
+            Status = MarketDataExportStatus.Pending,
+        };
+
+        db.IndicatorOptimizations.Add(run);
+        await db.SaveChangesAsync(ct);
+
+        scheduler.EnqueueOptimization(run.Id);
+        return Ok(ToOptimizationDto(run));
+    }
+
+    [HttpDelete("optimizations/{id:guid}")]
+    public async Task<IActionResult> DeleteOptimization(Guid id, CancellationToken ct)
+    {
+        var run = await db.IndicatorOptimizations
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == CurrentUserId, ct);
+        if (run is null) return NotFound();
+
+        db.IndicatorOptimizations.Remove(run);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Optimizasyondan çıkan parametreleri kullanıcının indikatör ayarı olarak kaydeder.
+    /// Yeni bir indikatör sınıfı yazmaz — mevcut indikatörün parametrelerini günceller.
+    /// </summary>
+    [HttpPost("optimizations/{id:guid}/apply")]
+    public async Task<IActionResult> ApplyToIndicator(Guid id, [FromBody] ApplyIndicatorRequest req, CancellationToken ct)
+    {
+        var run = await db.IndicatorOptimizations
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == CurrentUserId, ct);
+        if (run is null) return NotFound();
+
+        if (run.Status != MarketDataExportStatus.Completed || run.BestParamsJson is null)
+            return BadRequest(new { errors = new[] { "Optimizasyon tamamlanmamış." } });
+
+        var paramsToApply = req.Parameters is { Count: > 0 }
+            ? req.Parameters
+            : JsonSerializer.Deserialize<Dictionary<string, decimal>>(run.BestParamsJson) ?? [];
+
+        if (paramsToApply.Count == 0)
+            return BadRequest(new { errors = new[] { "Uygulanacak parametre yok." } });
+
+        // Aileyi uygulamadaki indikatöre eşle
+        var indicatorName = run.IndicatorFamily.ToUpperInvariant() switch
+        {
+            "T3"  => "Level1",
+            "RSI" => "RSI",
+            _     => null,
+        };
+
+        if (indicatorName is null)
+            return BadRequest(new
+            {
+                errors = new[]
+                {
+                    $"{run.IndicatorFamily} ailesi için henüz uygulanabilir bir indikatör yok. " +
+                    "Şu an yalnızca T3 (Level1) ve RSI parametreleri stratejiye aktarılabiliyor; " +
+                    "diğer aileler analiz amaçlıdır."
+                }
+            });
+
+        var indicator = await db.Indicators
+            .Include(i => i.ParameterDefinitions)
+            .FirstOrDefaultAsync(i => i.Name == indicatorName, ct);
+
+        if (indicator is null)
+            return NotFound(new { errors = new[] { $"{indicatorName} indikatörü bulunamadı." } });
+
+        var setting = await db.UserIndicatorSettings
+            .Include(s => s.ParameterValues)
+            .FirstOrDefaultAsync(s => s.UserId == CurrentUserId && s.IndicatorId == indicator.Id && s.CoinId == null, ct);
+
+        if (setting is null)
+        {
+            setting = new UserIndicatorSetting
+            {
+                UserId = CurrentUserId,
+                IndicatorId = indicator.Id,
+                IsEnabled = true,
+            };
+            db.UserIndicatorSettings.Add(setting);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var applied = new List<string>();
+
+        foreach (var def in indicator.ParameterDefinitions)
+        {
+            if (!paramsToApply.TryGetValue(def.ParameterKey, out var value)) continue;
+
+            var existing = setting.ParameterValues.FirstOrDefault(v => v.ParameterDefinitionId == def.Id);
+            var text = def.DataType.Equals("int", StringComparison.OrdinalIgnoreCase)
+                ? ((int)value).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            if (existing is null)
+            {
+                db.UserIndicatorParameterValues.Add(new UserIndicatorParameterValue
+                {
+                    UserIndicatorSettingId = setting.Id,
+                    ParameterDefinitionId = def.Id,
+                    Value = text,
+                });
+            }
+            else
+            {
+                existing.Value = text;
+            }
+
+            applied.Add($"{def.ParameterKey}={text}");
+        }
+
+        if (applied.Count == 0)
+            return BadRequest(new
+            {
+                errors = new[] { $"{indicatorName} indikatörünün parametreleri optimizasyon sonucuyla eşleşmedi." }
+            });
+
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            indicator = indicatorName,
+            applied,
+            message = $"{indicatorName} indikatörü güncellendi: {string.Join(", ", applied)}. "
+                    + "Stratejiler sayfasından bu indikatörü kullanan stratejileri kontrol edin."
+        });
+    }
+
+    // ─── DTO dönüşümleri ─────────────────────────────────────────────────────────
+
+    private static MarketDataExportDto ToExportDto(MarketDataExport e) => new(
+        e.Id, e.Name,
+        JsonSerializer.Deserialize<List<string>>(e.Symbols) ?? [],
+        e.SymbolCount, e.Timeframe, e.StartDate, e.EndDate, e.Format, e.IncludeIndicators,
+        e.Status.ToString(), e.ProgressPct, e.ProcessedSymbols, e.TotalRows,
+        e.FileSizeBytes, e.DataQualityNote, e.ErrorMessage, e.CreatedAt, e.CompletedAt);
+
+    private static IndicatorOptimizationDto ToOptimizationDto(IndicatorOptimization o) => new(
+        o.Id, o.Name,
+        JsonSerializer.Deserialize<List<string>>(o.Symbols) ?? [],
+        o.Timeframe, o.StartDate, o.EndDate, o.IndicatorFamily, o.CommissionPct,
+        o.Status.ToString(), o.ProgressPct, o.TestedCombinations,
+        o.BestParamsJson, o.BestReturnPct, o.BestWinRate, o.BestTradeCount,
+        o.BuyHoldReturnPct, o.InSampleReturnPct, o.OutOfSampleReturnPct,
+        o.Verdict, o.ErrorMessage, o.CreatedAt, o.CompletedAt);
+}
+
+// ─── İstek / yanıt modelleri ─────────────────────────────────────────────────────
+
+public record MarketSymbolDto(
+    string Symbol, string BaseAsset, decimal LastPrice,
+    decimal PriceChangePercent, decimal QuoteVolume24h, int TradeCount24h);
+
+public record TimeframeDto(string Key, string DisplayName, bool IsDerived, string SourceNote);
+
+public record EstimateRequest(int SymbolCount, string Timeframe, DateTime StartDate, DateTime EndDate);
+
+public record CreateExportRequest(
+    string? Name, List<string> Symbols, string Timeframe,
+    DateTime StartDate, DateTime EndDate,
+    string Format = "csv", bool IncludeIndicators = true);
+
+public record MarketDataExportDto(
+    Guid Id, string Name, List<string> Symbols, int SymbolCount,
+    string Timeframe, DateTime StartDate, DateTime EndDate,
+    string Format, bool IncludeIndicators,
+    string Status, int ProgressPct, int ProcessedSymbols, long TotalRows,
+    long? FileSizeBytes, string? DataQualityNote, string? ErrorMessage,
+    DateTime CreatedAt, DateTime? CompletedAt);
+
+public record CreateOptimizationRequest(
+    string? Name, List<string> Symbols, string Timeframe,
+    DateTime StartDate, DateTime EndDate, string Family,
+    decimal CommissionPct = 0.2m, Guid? MarketDataExportId = null);
+
+public record IndicatorOptimizationDto(
+    Guid Id, string Name, List<string> Symbols, string Timeframe,
+    DateTime StartDate, DateTime EndDate, string Family, decimal CommissionPct,
+    string Status, int ProgressPct, int TestedCombinations,
+    string? BestParamsJson, decimal? BestReturnPct, decimal? BestWinRate, int? BestTradeCount,
+    decimal? BuyHoldReturnPct, decimal? InSampleReturnPct, decimal? OutOfSampleReturnPct,
+    string? Verdict, string? ErrorMessage, DateTime CreatedAt, DateTime? CompletedAt);
+
+public record ApplyIndicatorRequest(Dictionary<string, decimal>? Parameters);

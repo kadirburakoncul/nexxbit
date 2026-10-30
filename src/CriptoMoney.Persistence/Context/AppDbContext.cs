@@ -35,6 +35,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BistIndicatorSetting> BistIndicatorSettings => Set<BistIndicatorSetting>();
     public DbSet<BistStrategy> BistStrategies => Set<BistStrategy>();
     public DbSet<BistPosition> BistPositions => Set<BistPosition>();
+    public DbSet<MarketDataExport> MarketDataExports => Set<MarketDataExport>();
+    public DbSet<IndicatorOptimization> IndicatorOptimizations => Set<IndicatorOptimization>();
     public DbSet<BistStrategyStock> BistStrategyStocks => Set<BistStrategyStock>();
     public DbSet<BistWatchlistItem> BistWatchlistItems => Set<BistWatchlistItem>();
 

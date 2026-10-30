@@ -58,6 +58,9 @@ public static class DependencyInjection
         services.AddScoped<DailyReportJob>();
         services.AddScoped<BistSignalScanJob>();
         services.AddScoped<PositionReconciliationJob>();
+        services.AddScoped<MarketDataExportJob>();
+        services.AddScoped<IndicatorOptimizationJob>();
+        services.AddScoped<IMarketDataJobScheduler, HangfireMarketDataJobScheduler>();
         services.AddScoped<IBacktestJobScheduler, HangfireBacktestJobScheduler>();
 
         return services;

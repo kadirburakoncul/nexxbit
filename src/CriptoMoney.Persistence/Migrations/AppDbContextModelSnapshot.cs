@@ -780,6 +780,109 @@ namespace CriptoMoney.Persistence.Migrations
                     b.ToTable("Indicators");
                 });
 
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.IndicatorOptimization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("BestParamsJson")
+                        .HasColumnType("longtext");
+
+                    b.Property<decimal?>("BestReturnPct")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int?>("BestTradeCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("BestWinRate")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("decimal(8,2)");
+
+                    b.Property<decimal?>("BuyHoldReturnPct")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("CommissionPct")
+                        .HasPrecision(8, 4)
+                        .HasColumnType("decimal(8,4)");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<decimal?>("InSampleReturnPct")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("IndicatorFamily")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<Guid?>("MarketDataExportId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("varchar(120)");
+
+                    b.Property<decimal?>("OutOfSampleReturnPct")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ProgressPct")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ResultsJson")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Symbols")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("TestedCombinations")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Timeframe")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("Verdict")
+                        .HasMaxLength(2000)
+                        .HasColumnType("varchar(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("IndicatorOptimizations");
+                });
+
             modelBuilder.Entity("CriptoMoney.Domain.Entities.IndicatorParameterDefinition", b =>
                 {
                     b.Property<int>("Id")
@@ -824,6 +927,92 @@ namespace CriptoMoney.Persistence.Migrations
                     b.HasIndex("IndicatorId");
 
                     b.ToTable("IndicatorParameterDefinitions");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.MarketDataExport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("DataQualityNote")
+                        .HasMaxLength(4000)
+                        .HasColumnType("varchar(4000)");
+
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<string>("FilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<bool>("IncludeIndicators")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("varchar(120)");
+
+                    b.Property<int>("ProcessedSymbols")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProgressPct")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SymbolCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Symbols")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Timeframe")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<long>("TotalRows")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("MarketDataExports");
                 });
 
             modelBuilder.Entity("CriptoMoney.Domain.Entities.Notification", b =>
@@ -1988,6 +2177,17 @@ namespace CriptoMoney.Persistence.Migrations
                     b.Navigation("Coin");
                 });
 
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.IndicatorOptimization", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("CriptoMoney.Domain.Entities.IndicatorParameterDefinition", b =>
                 {
                     b.HasOne("CriptoMoney.Domain.Entities.Indicator", "Indicator")
@@ -1997,6 +2197,17 @@ namespace CriptoMoney.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Indicator");
+                });
+
+            modelBuilder.Entity("CriptoMoney.Domain.Entities.MarketDataExport", b =>
+                {
+                    b.HasOne("CriptoMoney.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("CriptoMoney.Domain.Entities.Notification", b =>

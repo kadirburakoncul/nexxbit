@@ -35,6 +35,8 @@ public interface IApplicationDbContext
     DbSet<BistIndicatorSetting> BistIndicatorSettings { get; }
     DbSet<BistStrategy> BistStrategies { get; }
     DbSet<BistPosition> BistPositions { get; }
+    DbSet<MarketDataExport> MarketDataExports { get; }
+    DbSet<IndicatorOptimization> IndicatorOptimizations { get; }
     DbSet<BistStrategyStock> BistStrategyStocks { get; }
     DbSet<BistWatchlistItem> BistWatchlistItems { get; }
 

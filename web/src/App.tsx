@@ -36,6 +36,7 @@ import BistMomentumPage from '@/pages/BistMomentumPage'
 import MarketSelectPage from '@/pages/MarketSelectPage'
 import TradingAnalysisPage from '@/pages/TradingAnalysisPage'
 import AnalyticsPage from '@/pages/AnalyticsPage'
+import MarketDataPage from '@/pages/MarketDataPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -74,6 +75,7 @@ export default function App() {
             <Route path="/volatile" element={<VolatilePage />} />
             <Route path="/analysis" element={<TradingAnalysisPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/market-data" element={<MarketDataPage />} />
             <Route path="/admin/*" element={<AdminPage />} />
             <Route path="/chart" element={<ChartPage />} />
             <Route path="/admin/logs" element={<AdminLogsPage />} />
