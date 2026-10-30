@@ -461,7 +461,7 @@ const FAMILY_INFO: Record<string, FamilyInfo> = {
     combos: '72 kombinasyon',
   },
   EMA: {
-    rule: 'Hızlı EMA, yavaş EMA'yı YUKARI keserse AL; aşağı keserse SAT. Klasik trend takibi.',
+    rule: 'Hızlı EMA, yavaş EMA çizgisini YUKARI keserse AL; aşağı keserse SAT. Klasik trend takibi.',
     scans: 'hızlı periyot (5–26), yavaş periyot (21–200)',
     combos: '19 kombinasyon',
   },
