@@ -19,6 +19,9 @@ public class CustomRuleIndicator : IIndicator
 {
     public string Name => "CustomRule";
 
+    /// <summary>Z-skor penceresi — FormulaDiscovery ile aynı olmalı.</summary>
+    private const int ZWindow = 200;
+
     /// <summary>Formül eşiği ve pencere işlemleri için gereken asgari geçmiş.</summary>
     public int MinCandlesRequired => FeatureSet.WarmupBars + 5;
 
@@ -64,39 +67,53 @@ public class CustomRuleIndicator : IIndicator
         var series = PriceSeries.From(candles);
         var values = tree.Evaluate(series);
 
-        // Eşik, formülün kendi geçmiş dağılımından alınır — mutlak sayı değil,
-        // böylece farklı fiyat ölçeklerinde aynı anlamı taşır.
-        var sample = values
-            .Take(values.Length - 1)
-            .Where(v => !double.IsNaN(v) && !double.IsInfinity(v))
-            .OrderBy(v => v)
-            .ToArray();
-
-        if (sample.Length < 30 || Math.Abs(sample[^1] - sample[0]) < 1e-12) return Neutral();
-
-        var idx = Math.Clamp((int)(sample.Length * spec.Quantile), 0, sample.Length - 1);
-        var threshold = sample[idx];
-
         // Karar son KAPANMIŞ bardan verilir ([^1] devam ediyor olabilir).
-        var current = values[^2];
-        var inPosition = spec.GreaterThan ? current > threshold : current < threshold;
+        var i = values.Length - 2;
+        if (i < ZWindow / 2) return Neutral();
 
-        // Skor: eşikten uzaklık, dağılımın genişliğine göre normalize edilir.
-        var spread = sample[^1] - sample[0];
-        var distance = spread > 0 ? (current - threshold) / spread : 0;
+        // Formül değeri kendi GEÇMİŞİNE göre normalize edilir (z-skor).
+        // Keşif motoruyla birebir aynı mantık: ham seviye zamanla kaydığı için
+        // sabit eşik anlamını yitirir. Pencereye bu bar DAHİL DEĞİLDİR.
+        var from = Math.Max(0, i - ZWindow);
+        double sum = 0, sumSq = 0;
+        var count = 0;
+
+        for (var k = from; k < i; k++)
+        {
+            var v = values[k];
+            if (double.IsNaN(v) || double.IsInfinity(v)) continue;
+            sum += v; sumSq += v * v; count++;
+        }
+
+        if (count < 30) return Neutral();
+
+        var mean = sum / count;
+        var variance = Math.Max(sumSq / count - mean * mean, 0);
+        var sd = Math.Sqrt(variance);
+        if (sd < 1e-12) return Neutral();
+
+        var current = values[i];
+        if (double.IsNaN(current) || double.IsInfinity(current)) return Neutral();
+
+        var zScore = (current - mean) / sd;
+        var inPosition = spec.GreaterThan ? zScore > spec.Quantile : zScore < spec.Quantile;
+
+        // Skor: eşikten z cinsinden uzaklık
+        var distance = zScore - spec.Quantile;
         if (!spec.GreaterThan) distance = -distance;
-        var score = Math.Clamp((decimal)(distance * 6), -3m, 3m);
+        var score = Math.Clamp((decimal)(distance * 1.5), -3m, 3m);
 
         return new IndicatorResult(
             Name,
             Math.Round(score, 3),
-            (decimal)Math.Round(current, 6),
+            (decimal)Math.Round(zScore, 4),
             inPosition ? "BUY" : "SELL",
             new Dictionary<string, decimal>
             {
                 ["formul_degeri"] = (decimal)Math.Round(current, 6),
-                ["esik"]          = (decimal)Math.Round(threshold, 6),
-                ["yuzdelik"]      = (decimal)spec.Quantile,
+                ["z_skor"]        = (decimal)Math.Round(zScore, 4),
+                ["z_esik"]        = (decimal)spec.Quantile,
+                ["pencere_ort"]   = (decimal)Math.Round(mean, 6),
             });
     }
 

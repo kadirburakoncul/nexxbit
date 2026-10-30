@@ -239,11 +239,12 @@ public sealed class BinaryNode(BinaryOp op, FormulaNode left, FormulaNode right)
 public sealed record DiscoveredFormula(
     string Expression,
     string ExpressionJson,
-    double ThresholdQuantile,
+    double ThresholdQuantile,   // z-skor eşiği (alan adı geriye dönük uyum için korundu)
     bool GreaterThan)
 {
     public string Describe() =>
-        $"{Expression} {(GreaterThan ? ">" : "<")} kendi {ThresholdQuantile * 100:0}. yüzdeliği";
+        $"{Expression}, son 200 barlık ortalamasının {ThresholdQuantile:+0.0;-0.0;0.0} "
+        + $"standart sapma {(GreaterThan ? "ÜSTÜNDE" : "ALTINDA")}";
 }
 
 public record FormulaOutcome(
@@ -300,7 +301,14 @@ public class FormulaDiscovery : IFormulaDiscovery
     private static int MinSymbolCoverage(int total) => Math.Max(1, (int)Math.Ceiling(total * 0.6));
 
     private static readonly int[] Periods = [3, 5, 10, 14, 20, 50];
-    private static readonly double[] Quantiles = [0.2, 0.35, 0.5, 0.65, 0.8];
+    /// <summary>
+    /// Eşik adayları z-skor cinsinden: "formül, son N barlık ortalamasının
+    /// kaç standart sapma üstünde/altında".
+    /// </summary>
+    private static readonly double[] ZThresholds = [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5];
+
+    /// <summary>Z-skorun hesaplandığı hareketli pencere.</summary>
+    private const int ZWindow = 200;
 
     public async Task<List<FormulaOutcome>> EvolveAsync(
         IReadOnlyDictionary<string, List<CandleInput>> dataBySymbol,
@@ -326,7 +334,7 @@ public class FormulaDiscovery : IFormulaDiscovery
             var tree = RandomTree(rng, MaxDepth);
             if (tree.Size > MaxComplexity) continue;
             population.Add(new Individual(tree,
-                Quantiles[rng.Next(Quantiles.Length)],
+                ZThresholds[rng.Next(ZThresholds.Length)],
                 rng.Next(2) == 0));
         }
 
@@ -369,7 +377,7 @@ public class FormulaDiscovery : IFormulaDiscovery
                 if (childTree.Size > MaxComplexity) continue;
 
                 var q = rng.NextDouble() < 0.25
-                    ? Quantiles[rng.Next(Quantiles.Length)]
+                    ? ZThresholds[rng.Next(ZThresholds.Length)]
                     : p1.Quantile;
                 var gt = rng.NextDouble() < 0.15 ? rng.Next(2) == 0 : p1.GreaterThan;
 
@@ -579,8 +587,8 @@ public class FormulaDiscovery : IFormulaDiscovery
         var values = s.GetValues(ind);
         if (values is null) return null;
 
-        var threshold = s.GetThreshold(ind, values);
-        if (double.IsNaN(threshold)) return null;
+        var z = s.GetZScores(ind, values);
+        if (z is null) return null;
 
         var (from, to) = s.Range(seg);
         if (to - from < 40) return null;
@@ -591,8 +599,8 @@ public class FormulaDiscovery : IFormulaDiscovery
 
         for (var i = from; i < to - 1; i++)
         {
-            var v = values[i];
-            var hold = ind.GreaterThan ? v > threshold : v < threshold;
+            var v = z[i];
+            var hold = ind.GreaterThan ? v > ind.Quantile : v < ind.Quantile;
 
             if (entry is null && hold) entry = s.Series.Open[i + 1];
             else if (entry is not null && !hold)
@@ -676,7 +684,7 @@ public class FormulaDiscovery : IFormulaDiscovery
 
         // Aynı formül birçok birey tarafından paylaşılır; seri bir kez hesaplanır.
         private readonly Dictionary<string, double[]> _valueCache = [];
-        private readonly Dictionary<string, double> _thresholdCache = [];
+        private readonly Dictionary<string, double[]> _zCache = [];
 
         public static SymbolSeries Build(string name, List<CandleInput> candles)
         {
@@ -706,51 +714,69 @@ public class FormulaDiscovery : IFormulaDiscovery
             return v;
         }
 
-        public double GetThreshold(Individual ind, double[] values)
+        /// <summary>
+        /// Formül değerini kendi GEÇMİŞİNE göre normalize eder (z-skor).
+        ///
+        /// Neden gerekli: formülün ham seviyesi zamanla kayar (fiyat yükseldikçe
+        /// fiyat türevli her formül de yükselir). Eğitimden alınan SABİT bir eşik
+        /// test döneminde anlamını yitiriyordu — ölçümde her formülün doğrulamada
+        /// iyi, testte kötü çıkmasının ana sebebi buydu.
+        ///
+        /// Z-skor yalnızca ÖNCEKİ barlardan hesaplanır; ileriye bakma yoktur.
+        /// </summary>
+        public double[]? GetZScores(Individual ind, double[] values)
         {
-            var key = $"{ind.Tree.ToText()}|{ind.Quantile:0.00}";
-            if (_thresholdCache.TryGetValue(key, out var cached)) return cached;
+            var key = ind.Tree.ToText();
+            if (_zCache.TryGetValue(key, out var cached)) return cached;
 
-            // Eşik YALNIZCA eğitim bölümünden — doğrulama/test sızıntısı olmaz
-            var sample = new List<double>(TrainEnd - WarmupBars);
-            for (var i = WarmupBars; i < TrainEnd; i++)
+            var n = values.Length;
+            var z = new double[n];
+
+            double sum = 0, sumSq = 0;
+            var count = 0;
+
+            for (var i = 0; i < n; i++)
             {
                 var v = values[i];
-                if (!double.IsNaN(v) && !double.IsInfinity(v)) sample.Add(v);
+                var valid = !double.IsNaN(v) && !double.IsInfinity(v);
+
+                // Önce mevcut pencereye göre z hesapla (bu bar pencereye DAHİL DEĞİL)
+                if (valid && count >= 30)
+                {
+                    var mean = sum / count;
+                    var variance = Math.Max(sumSq / count - mean * mean, 0);
+                    var sd = Math.Sqrt(variance);
+                    z[i] = sd > 1e-12 ? (v - mean) / sd : 0;
+                }
+
+                // Sonra bu barı pencereye ekle
+                if (valid)
+                {
+                    sum += v; sumSq += v * v; count++;
+                    if (i >= ZWindow)
+                    {
+                        var old = values[i - ZWindow];
+                        if (!double.IsNaN(old) && !double.IsInfinity(old))
+                        {
+                            sum -= old; sumSq -= old * old; count--;
+                        }
+                    }
+                }
             }
 
-            if (sample.Count < 30) return double.NaN;
-            sample.Sort();
-
-            var idx = Math.Clamp((int)(sample.Count * ind.Quantile), 0, sample.Count - 1);
-            var th = sample[idx];
-
-            // Neredeyse sabit formüller elenmeli: uzun pencereli bir "en yüksek"
-            // işlemi değeri doygunlaştırıp sabit hale getirebilir; böyle bir formül
-            // geçmişte iyi görünse bile hiç sinyal üretmez.
-            //
-            // Önceki ölçü (yayılım / büyüklük oranı) kırılgandı: eşik sıfıra yakınsa
-            // oran patlıyor, büyükse sönüyordu — sağlam formüller sembollerin çoğunda
-            // reddediliyordu (8 coinin 1-3'ünde geçerli kalıyordu).
-            //
-            // Doğrudan önemli olanı ölçüyoruz: değer eşiği kaç kez KESİYOR.
-            // Ölçek bağımsızdır ve sinyal üretmeyen formülü kesin yakalar.
+            // Sinyal hiç yön değiştirmiyorsa formül bilgi taşımıyordur
             var crossings = 0;
-            var above = values[WarmupBars] > th;
+            var above = z[WarmupBars] > ind.Quantile;
             for (var i = WarmupBars + 1; i < TrainEnd; i++)
             {
-                var v = values[i];
-                if (double.IsNaN(v) || double.IsInfinity(v)) continue;
-                var nowAbove = v > th;
+                var nowAbove = z[i] > ind.Quantile;
                 if (nowAbove != above) { crossings++; above = nowAbove; }
             }
+            if (crossings < 6) return null;
 
-            // En az 6 kesişim ≈ 3 gidiş-dönüş. Altında kalan formül pratikte sabittir.
-            if (crossings < 6) return double.NaN;
-
-            if (_thresholdCache.Count > 8000) _thresholdCache.Clear();
-            _thresholdCache[key] = th;
-            return th;
+            if (_zCache.Count > 3000) _zCache.Clear();
+            _zCache[key] = z;
+            return z;
         }
     }
 }
