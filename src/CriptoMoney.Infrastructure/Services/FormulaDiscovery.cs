@@ -718,8 +718,16 @@ public class FormulaDiscovery : IFormulaDiscovery
             var idx = Math.Clamp((int)(sample.Count * ind.Quantile), 0, sample.Count - 1);
             var th = sample[idx];
 
-            // Tüm değerler aynıysa formül bilgi taşımıyordur
-            if (Math.Abs(sample[^1] - sample[0]) < 1e-12) return double.NaN;
+            // Neredeyse sabit formüller elenir. Örneğin uzun pencereli bir "en yüksek"
+            // işlemi değeri doygunlaştırıp sabit hale getirebilir; böyle bir formül
+            // geçmişte iyi görünse bile sinyal üretmez, bilgi taşımaz.
+            // Ölçü: çeyrekler arası yayılım, büyüklüğüne göre anlamlı olmalı.
+            var q1 = sample[sample.Count / 4];
+            var q3 = sample[sample.Count * 3 / 4];
+            var spread = q3 - q1;
+            var magnitude = Math.Max(Math.Abs(th), 1e-6);
+
+            if (spread / magnitude < 0.002) return double.NaN;
 
             if (_thresholdCache.Count > 8000) _thresholdCache.Clear();
             _thresholdCache[key] = th;

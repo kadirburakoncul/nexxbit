@@ -53,7 +53,7 @@ public class CustomRuleIndicator : IIndicator
     private IndicatorResult EvaluateFormula(IReadOnlyList<CandleInput> candles, string json)
     {
         FormulaSpec? spec;
-        try { spec = JsonSerializer.Deserialize<FormulaSpec>(json); }
+        try { spec = JsonSerializer.Deserialize<FormulaSpec>(json, SpecOptions); }
         catch (JsonException) { return Neutral(); }
 
         if (spec?.Tree is null) return Neutral();
@@ -101,6 +101,16 @@ public class CustomRuleIndicator : IIndicator
     }
 
     private record FormulaSpec(string? Kind, string? Expression, string? Tree, double Quantile, bool GreaterThan);
+
+    /// <summary>
+    /// Kaydedilen tanım camelCase ("kind", "tree"), kayıt tipi PascalCase.
+    /// System.Text.Json varsayılan olarak harf duyarlıdır — eşleşmezse tüm
+    /// alanlar boş gelir ve indikatör sessizce çalışmaz.
+    /// </summary>
+    private static readonly JsonSerializerOptions SpecOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     // ─── Koşul listesi (KURAL) ───────────────────────────────────────────────
 
