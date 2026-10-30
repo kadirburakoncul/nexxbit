@@ -236,15 +236,17 @@ public class MarketDataController(
         if (paramsToApply.Count == 0)
             return BadRequest(new { errors = new[] { "Uygulanacak parametre yok." } });
 
-        // Aileyi uygulamadaki indikatöre eşle
-        var indicatorName = run.IndicatorFamily.ToUpperInvariant() switch
+        // Aileyi uygulamadaki indikatöre eşle. T3 motoru kurulumlara göre
+        // Level1 / Tillson / TillsonT3 adlarından biriyle kayıtlı olabilir,
+        // bu yüzden tek isme bağlanmak yerine var olan ilki kullanılır.
+        string[]? candidateNames = run.IndicatorFamily.ToUpperInvariant() switch
         {
-            "T3"  => "Level1",
-            "RSI" => "RSI",
+            "T3"  => ["Level1", "Tillson", "TillsonT3"],
+            "RSI" => ["RSI"],
             _     => null,
         };
 
-        if (indicatorName is null)
+        if (candidateNames is null)
             return BadRequest(new
             {
                 errors = new[]
@@ -257,10 +259,15 @@ public class MarketDataController(
 
         var indicator = await db.Indicators
             .Include(i => i.ParameterDefinitions)
-            .FirstOrDefaultAsync(i => i.Name == indicatorName, ct);
+            .FirstOrDefaultAsync(i => candidateNames.Contains(i.Name), ct);
 
         if (indicator is null)
-            return NotFound(new { errors = new[] { $"{indicatorName} indikatörü bulunamadı." } });
+            return NotFound(new
+            {
+                errors = new[] { $"Bu kurulumda {string.Join(" / ", candidateNames)} indikatörlerinden hiçbiri kayıtlı değil." }
+            });
+
+        var indicatorName = indicator.Name;
 
         var setting = await db.UserIndicatorSettings
             .Include(s => s.ParameterValues)
@@ -279,6 +286,12 @@ public class MarketDataController(
         }
 
         var applied = new List<string>();
+        var definedKeys = indicator.ParameterDefinitions.Select(d => d.ParameterKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Optimizasyonun bulduğu her parametrenin indikatörde karşılığı olmayabilir
+        // (örn. "kaç bar onay" T3'ün kendi ayarı değil, sinyal kuralının parçası).
+        // Bunlar sessizce yutulmaz, kullanıcıya bildirilir.
+        var skipped = paramsToApply.Keys.Where(k => !definedKeys.Contains(k)).ToList();
 
         foreach (var def in indicator.ParameterDefinitions)
         {
@@ -314,13 +327,13 @@ public class MarketDataController(
 
         await db.SaveChangesAsync(ct);
 
-        return Ok(new
-        {
-            indicator = indicatorName,
-            applied,
-            message = $"{indicatorName} indikatörü güncellendi: {string.Join(", ", applied)}. "
-                    + "Stratejiler sayfasından bu indikatörü kullanan stratejileri kontrol edin."
-        });
+        var message = $"{indicatorName} indikatörü güncellendi: {string.Join(", ", applied)}.";
+        if (skipped.Count > 0)
+            message += $" Şu parametrelerin indikatörde karşılığı yok, uygulanmadı: {string.Join(", ", skipped)}"
+                     + " — bunlar sinyal kuralının parçası, strateji ayarlarından elle girilmeli.";
+        message += " Stratejiler sayfasından bu indikatörü kullanan stratejileri kontrol edin.";
+
+        return Ok(new { indicator = indicatorName, applied, skipped, message });
     }
 
     // ─── DTO dönüşümleri ─────────────────────────────────────────────────────────
